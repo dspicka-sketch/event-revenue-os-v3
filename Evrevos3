@@ -1,0 +1,7 @@
+cd path/to/event-revenue-os-v3
+git init
+git add .
+git commit -m "Initial commit for Event Revenue OS v3"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/event-revenue-os-v3.git
+git push -u origin main
