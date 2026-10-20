@@ -150,6 +150,7 @@ function buildPerformance(eventId: string, startUtc: string, seed: number, order
   const attendees: EbAttendee[] = [];
   const base = Date.parse("2026-09-01T17:00:00Z");
   const extra = revision >= 1 ? 1 : 0;
+  let partialRefundDone = false;
   for (let i = 0; i < orderCount + extra; i++) {
     const orderId = `${eventId}-o${String(i + 1).padStart(4, "0")}`;
     const created = new Date(i < orderCount ? base + Math.floor(r() * 50) * 86400_000 + i * 60_000 : Date.parse("2026-10-19T20:00:00Z")).toISOString().replace(".000", "");
@@ -175,13 +176,15 @@ function buildPerformance(eventId: string, startUtc: string, seed: number, order
       });
     }
     let changed = created;
-    // Revision 1: order 3 fully refunded; order 9 has one ticket refunded.
+    // Revision 1: order 3 fully refunded; the first multi-ticket order after
+    // order 8 has one ticket refunded.
     if (revision >= 1 && i === 2) {
       status = "refunded";
       changed = "2026-10-18T18:00:00Z";
       for (const l of lines) Object.assign(l, { refunded: true, status: "Not Attending", changed });
     }
-    if (revision >= 1 && i === 8 && lines.length > 1) {
+    if (revision >= 1 && i >= 8 && !partialRefundDone && status === "placed" && !comp && lines.length > 1) {
+      partialRefundDone = true;
       changed = "2026-10-18T19:00:00Z";
       Object.assign(lines[0]!, { refunded: true, status: "Not Attending", changed });
     }

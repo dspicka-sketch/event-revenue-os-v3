@@ -3,6 +3,8 @@ import type { FastifyInstance } from "fastify";
 import type { Db } from "../src/db/pool.js";
 import { createConnection, createMappedEvent, createOrganization } from "../src/db/repo.js";
 import { buildApp } from "../src/server/app.js";
+import { EventbriteAdapter } from "../src/providers/eventbrite/adapter.js";
+import { createFixtureTransport, pilotFixture, type FixtureFailure } from "../src/providers/eventbrite/fixtures.js";
 import { describeDb, freshDb } from "./helpers/db.js";
 
 describeDb("HTTP API", () => {
@@ -13,6 +15,7 @@ describeDb("HTTP API", () => {
   let eventId: string;
   let liveEventId: string;
   const auth = { authorization: "Bearer test-access-token" };
+  let failure: FixtureFailure | undefined;
 
   beforeAll(async () => {
     db = await freshDb();
@@ -25,7 +28,14 @@ describeDb("HTTP API", () => {
     liveEventId = (await createMappedEvent(db, { organizationId: live.id, connectionId: lc.id, sourceEventId: "2", name: "Live" })).canonicalEventId;
     liveOrgId = live.id;
     process.env.REVOS_TEST_SECRET = "super-secret-value-should-never-leak";
-    app = await buildApp({ db, accessToken: "test-access-token" });
+    app = await buildApp({
+      db,
+      accessToken: "test-access-token",
+      adapterFactory: (c) => {
+        const t = createFixtureTransport({ events: pilotFixture(), failFor: () => failure });
+        return new EventbriteAdapter({ token: "t", organizationId: c.provider_account_id, fetchImpl: t.fetch, sleep: async () => {}, maxRetries: 0 });
+      },
+    });
   });
   afterAll(async () => { await app?.close(); await db?.end(); delete process.env.REVOS_TEST_SECRET; });
 
@@ -44,6 +54,19 @@ describeDb("HTTP API", () => {
     expect(body.event.connection.mode).toBe("fixture");
     expect(body.event.revenue.currencies[0].tickets.paid).toBeGreaterThan(0);
     expect(body.syncRuns[0].status).toBe("succeeded");
+  });
+
+  it("labels retained data stale with an actionable message after a failed refresh", async () => {
+    failure = { status: 429 };
+    const r = await app.inject({ method: "POST", url: `/api/orgs/${orgId}/events/${eventId}/refresh`, headers: auth });
+    failure = undefined;
+    expect(r.statusCode).toBe(502);
+    expect(r.json()).toMatchObject({ kind: "rate_limited" });
+    expect(r.json().action).toMatch(/rate limit/i);
+    const e = (await app.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: auth })).json().event;
+    expect(e.freshness).toMatchObject({ hasData: true, stale: true });
+    expect(e.connection.status).toBe("stale");
+    expect(e.revenue.currencies[0].tickets.paid).toBeGreaterThan(0);
   });
 
   it("scopes event reads to the organization in the path", async () => {

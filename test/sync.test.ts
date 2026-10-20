@@ -62,6 +62,7 @@ describeDb("sync (database)", () => {
     expect(ub.measures.refunds.minor).toBeGreaterThan(0);
     expect(ub.tickets.refunded).toBeGreaterThan(0);
     expect(ub.orders.refunded).toBe(1);
+    expect(b.revenue.exceptions.filter((e) => e.code === "partial_refund_line_level")).toHaveLength(1);
   });
 
   it("flags orders that disappear from a later full read instead of counting them", async () => {
