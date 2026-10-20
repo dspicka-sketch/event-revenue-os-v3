@@ -11,11 +11,13 @@ import { ProviderError } from "../providers/errors.js";
 import { EventbriteAdapter } from "../providers/eventbrite/adapter.js";
 import { createFixtureTransport, pilotFixture } from "../providers/eventbrite/fixtures.js";
 
-export interface SnapshotSource {
+export interface SourceAdapter {
+  /** Cheap authenticated read proving the credential works. */
+  validate(): Promise<{ ok: true }>;
   fetchEventSnapshot(sourceEventId: string): Promise<NormalizedSnapshot>;
 }
 
-export type AdapterFactory = (connection: ConnectionRow, ctx: { priorSuccesses: number }) => SnapshotSource;
+export type AdapterFactory = (connection: ConnectionRow, ctx: { priorSuccesses: number }) => SourceAdapter;
 
 /** Default factory: live connections read the secret named by secret_ref from the server environment. */
 export const defaultAdapterFactory: AdapterFactory = (connection, ctx) => {
@@ -72,6 +74,7 @@ export async function syncEvent(
       proceedsPolicy: connection.proceeds_policy,
       asOf: now(),
       missingFromSource: stored.missing,
+      timeZone: mapping.venue_timezone,
     });
     await completeSyncRun(
       client,

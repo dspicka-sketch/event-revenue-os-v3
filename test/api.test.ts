@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { Db } from "../src/db/pool.js";
+import { createUser, setMembership } from "../src/auth/accounts.js";
 import { createConnection, createMappedEvent, createOrganization } from "../src/db/repo.js";
 import { buildApp } from "../src/server/app.js";
 import { EventbriteAdapter } from "../src/providers/eventbrite/adapter.js";
 import { createFixtureTransport, pilotFixture, type FixtureFailure } from "../src/providers/eventbrite/fixtures.js";
+import type { EventDetailResponse, PulseResponse } from "../src/shared/apiTypes.js";
 import { describeDb, freshDb } from "./helpers/db.js";
 
 describeDb("HTTP API", () => {
@@ -13,75 +15,149 @@ describeDb("HTTP API", () => {
   let orgId: string;
   let liveOrgId: string;
   let eventId: string;
-  let liveEventId: string;
-  const auth = { authorization: "Bearer test-access-token" };
+  let connId: string;
   let failure: FixtureFailure | undefined;
+  const PW = "correct horse battery staple";
+  let admin: Record<string, string>;
+  let viewer: Record<string, string>;
+
+  async function signIn(email: string, password = PW, client = "web") {
+    return app.inject({ method: "POST", url: "/api/auth/login", payload: { email, password, client } });
+  }
 
   beforeAll(async () => {
     db = await freshDb();
     const org = await createOrganization(db, { name: "[FIXTURE] API", isFixture: true });
     const conn = await createConnection(db, { organizationId: org.id, provider: "eventbrite", providerAccountId: "fixture-eb-org-1", mode: "fixture", secretRef: null });
-    eventId = (await createMappedEvent(db, { organizationId: org.id, connectionId: conn.id, sourceEventId: "fx-1001", name: "Night 1" })).canonicalEventId;
+    connId = conn.id;
+    eventId = (await createMappedEvent(db, { organizationId: org.id, connectionId: conn.id, sourceEventId: "fx-1001", name: "Night 1", startUtc: "2026-11-14T04:00:00Z" })).canonicalEventId;
     orgId = org.id;
     const live = await createOrganization(db, { name: "Live", isFixture: false });
     const lc = await createConnection(db, { organizationId: live.id, provider: "eventbrite", providerAccountId: "1", mode: "live", secretRef: "REVOS_TEST_SECRET" });
-    liveEventId = (await createMappedEvent(db, { organizationId: live.id, connectionId: lc.id, sourceEventId: "2", name: "Live" })).canonicalEventId;
+    await createMappedEvent(db, { organizationId: live.id, connectionId: lc.id, sourceEventId: "2", name: "Live" });
     liveOrgId = live.id;
     process.env.REVOS_TEST_SECRET = "super-secret-value-should-never-leak";
+
+    const a = await createUser(db, { email: "admin@example.com", password: PW });
+    const v = await createUser(db, { email: "viewer@example.com", password: PW });
+    await setMembership(db, orgId, a, "admin");
+    await setMembership(db, liveOrgId, a, "admin");
+    await setMembership(db, orgId, v, "viewer");
+
     app = await buildApp({
       db,
-      accessToken: "test-access-token",
+      now: () => new Date("2026-10-20T19:00:00Z"),
       adapterFactory: (c) => {
         const t = createFixtureTransport({ events: pilotFixture(), failFor: () => failure });
         return new EventbriteAdapter({ token: "t", organizationId: c.provider_account_id, fetchImpl: t.fetch, sleep: async () => {}, maxRetries: 0 });
       },
     });
+    admin = { authorization: `Bearer ${(await signIn("admin@example.com")).json().token}` };
+    viewer = { authorization: `Bearer ${(await signIn("viewer@example.com", PW, "mobile")).json().token}` };
   });
   afterAll(async () => { await app?.close(); await db?.end(); delete process.env.REVOS_TEST_SECRET; });
 
-  it("requires the access token", async () => {
-    expect((await app.inject({ url: "/api/orgs" })).statusCode).toBe(401);
-    expect((await app.inject({ url: "/api/orgs", headers: { authorization: "Bearer wrong" } })).statusCode).toBe(401);
+  it("requires a valid session", async () => {
+    expect((await app.inject({ url: "/api/me" })).statusCode).toBe(401);
+    expect((await app.inject({ url: "/api/me", headers: { authorization: "Bearer nope" } })).statusCode).toBe(401);
     expect((await app.inject({ url: "/api/health" })).statusCode).toBe(200);
   });
 
-  it("refreshes a fixture event and returns the detail", async () => {
-    const r = await app.inject({ method: "POST", url: `/api/orgs/${orgId}/events/${eventId}/refresh`, headers: auth });
+  it("rejects wrong passwords and unknown users identically", async () => {
+    const a = await signIn("admin@example.com", "wrong password here");
+    const b = await signIn("nobody@example.com", "wrong password here");
+    expect(a.statusCode).toBe(401);
+    expect(b.statusCode).toBe(401);
+    expect(a.json()).toEqual(b.json());
+  });
+
+  it("lists only the caller's organizations with roles", async () => {
+    const me = (await app.inject({ url: "/api/me", headers: viewer })).json();
+    expect(me.organizations.map((o: { id: string; role: string }) => [o.id, o.role])).toEqual([[orgId, "viewer"]]);
+  });
+
+  it("hides organizations the caller is not a member of", async () => {
+    expect((await app.inject({ url: `/api/orgs/${liveOrgId}/events`, headers: viewer })).statusCode).toBe(404);
+    expect((await app.inject({ url: `/api/orgs/${liveOrgId}/pulse`, headers: viewer })).statusCode).toBe(404);
+    expect((await app.inject({ url: `/api/orgs/${liveOrgId}/events/${eventId}`, headers: admin })).statusCode).toBe(404);
+  });
+
+  it("lets a viewer refresh and read the show detail with its card", async () => {
+    const r = await app.inject({ method: "POST", url: `/api/orgs/${orgId}/events/${eventId}/refresh`, headers: viewer });
     expect(r.statusCode).toBe(200);
-    const d = await app.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: auth });
-    const body = d.json();
+    const body = (await app.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: viewer })).json() as EventDetailResponse;
     expect(body.organization.is_fixture).toBe(true);
     expect(body.event.connection.mode).toBe("fixture");
-    expect(body.event.revenue.currencies[0].tickets.paid).toBeGreaterThan(0);
-    expect(body.syncRuns[0].status).toBe("succeeded");
+    expect(body.card.tickets!.paid).toBe(body.event.revenue!.currencies[0]!.tickets.paid);
+    expect(body.card.phase).toBe("upcoming");
+    expect(body.syncRuns[0]!.status).toBe("succeeded");
+  });
+
+  it("lets only admins set targets, and validates them", async () => {
+    const url = `/api/orgs/${orgId}/events/${eventId}/targets`;
+    expect((await app.inject({ method: "PUT", url, headers: viewer, payload: { measure: "paidTickets", value: 400, currency: null } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PUT", url, headers: admin, payload: { measure: "paidTickets", value: 1.5, currency: null } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url, headers: admin, payload: { measure: "grossAfterRefunds", value: 100 } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url, headers: admin, payload: { measure: "paidTickets", value: 400, currency: null } })).statusCode).toBe(200);
+    const pulse = (await app.inject({ url: `/api/orgs/${orgId}/pulse`, headers: viewer })).json() as PulseResponse;
+    const t = pulse.shows[0]!.targets[0]!;
+    expect(t).toMatchObject({ measure: "paidTickets", target: 400, source: "manual" });
+    expect(t.actual).toBe(pulse.shows[0]!.tickets!.paid);
+  });
+
+  it("returns a pulse that matches the desktop event figures", async () => {
+    const pulse = (await app.inject({ url: `/api/orgs/${orgId}/pulse`, headers: viewer })).json() as PulseResponse;
+    const events = (await app.inject({ url: `/api/orgs/${orgId}/events`, headers: admin })).json();
+    const desktop = events.events[0].revenue.currencies[0];
+    expect(pulse.shows[0]!.revenue!.grossAfterRefunds).toEqual(desktop.measures.grossAfterRefunds);
+    expect(pulse.summary.upcomingShows).toBe(1);
   });
 
   it("labels retained data stale with an actionable message after a failed refresh", async () => {
     failure = { status: 429 };
-    const r = await app.inject({ method: "POST", url: `/api/orgs/${orgId}/events/${eventId}/refresh`, headers: auth });
+    const r = await app.inject({ method: "POST", url: `/api/orgs/${orgId}/events/${eventId}/refresh`, headers: admin });
     failure = undefined;
     expect(r.statusCode).toBe(502);
     expect(r.json()).toMatchObject({ kind: "rate_limited" });
     expect(r.json().action).toMatch(/rate limit/i);
-    const e = (await app.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: auth })).json().event;
-    expect(e.freshness).toMatchObject({ hasData: true, stale: true });
-    expect(e.connection.status).toBe("stale");
-    expect(e.revenue.currencies[0].tickets.paid).toBeGreaterThan(0);
+    const d = (await app.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: admin })).json() as EventDetailResponse;
+    expect(d.event.freshness).toMatchObject({ hasData: true, stale: true });
+    expect(d.event.connection.status).toBe("stale");
+    expect(d.card.attention.map((a) => a.code)).toContain("stale");
+    expect(d.event.revenue!.currencies[0]!.tickets.paid).toBeGreaterThan(0);
   });
 
-  it("scopes event reads to the organization in the path", async () => {
-    expect((await app.inject({ url: `/api/orgs/${liveOrgId}/events/${eventId}`, headers: auth })).statusCode).toBe(404);
-    expect((await app.inject({ method: "POST", url: `/api/orgs/${liveOrgId}/events/${eventId}/refresh`, headers: auth })).statusCode).toBe(404);
-  });
-
-  it("never returns provider secrets", async () => {
-    // The secret is set in the server environment; it must never appear in API output.
-    const r = await app.inject({ url: `/api/orgs/${liveOrgId}/events`, headers: auth });
+  it("lists integrations without exposing secret values", async () => {
+    const r = await app.inject({ url: `/api/orgs/${liveOrgId}/connections`, headers: admin });
     expect(r.body).not.toContain("super-secret-value-should-never-leak");
-    expect(r.json().events[0].connection.status).toBe("not_configured");
+    expect(r.json().connections[0]).toMatchObject({ secretPresent: true, secretRef: "REVOS_TEST_SECRET", mode: "live" });
+    expect(r.json().planned.map((p: { milestone: string }) => p.milestone)).toEqual(["M2", "M3", "M4", "M5", "M6"]);
+    const ev = await app.inject({ url: `/api/orgs/${liveOrgId}/events`, headers: admin });
+    expect(ev.body).not.toContain("super-secret-value-should-never-leak");
+  });
+
+  it("tests a connection (admin only) without changing its stored status", async () => {
+    const url = `/api/orgs/${orgId}/connections/${connId}/test`;
+    expect((await app.inject({ method: "POST", url, headers: viewer })).statusCode).toBe(403);
+    const r = await app.inject({ method: "POST", url, headers: admin });
+    expect(r.json()).toMatchObject({ ok: true });
+    expect(r.json().message).toMatch(/not a live credential check/);
+  });
+
+  it("revokes the session on logout", async () => {
+    const tok = (await signIn("viewer@example.com")).json().token;
+    const h = { authorization: `Bearer ${tok}` };
+    expect((await app.inject({ url: "/api/me", headers: h })).statusCode).toBe(200);
+    await app.inject({ method: "POST", url: "/api/auth/logout", headers: h });
+    expect((await app.inject({ url: "/api/me", headers: h })).statusCode).toBe(401);
+  });
+
+  it("throttles repeated failed sign-ins", async () => {
+    for (let i = 0; i < 10; i++) await signIn("viewer@example.com", "definitely wrong pw");
+    expect((await signIn("viewer@example.com")).statusCode).toBe(429);
   });
 
   it("returns 404 for malformed IDs", async () => {
-    expect((await app.inject({ url: `/api/orgs/nope/events`, headers: auth })).statusCode).toBe(404);
+    expect((await app.inject({ url: `/api/orgs/nope/events`, headers: admin })).statusCode).toBe(404);
   });
 });

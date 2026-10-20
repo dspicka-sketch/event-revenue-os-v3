@@ -75,7 +75,20 @@ export interface CurrencyRevenue {
     cashRemitted: Measure;
   };
   last7Days: { paidTickets: number; grossSales: Measure };
+  /**
+   * Net sales by transaction date in the venue timezone (current state: fully
+   * refunded orders and refunded tickets are excluded). Sorted ascending.
+   */
+  dailySales: DailySales[];
   reconciliation: ReconciliationRow[];
+}
+
+export interface DailySales {
+  /** YYYY-MM-DD in the venue timezone. */
+  date: string;
+  paidTickets: number;
+  /** Gross buyer payments after refunds for orders placed that day; null if any amount unknown. */
+  grossAfterRefundsMinor: MinorUnits | null;
 }
 
 export interface EventRevenue {
@@ -130,6 +143,13 @@ export interface ComputeOptions {
   asOf: Date;
   /** Orders known to exist previously but absent from the latest full read. */
   missingFromSource?: string[];
+  /** Venue timezone for sales-date bucketing. Default America/Los_Angeles. */
+  timeZone?: string;
+}
+
+/** YYYY-MM-DD of an instant in a timezone. */
+export function localDate(iso: string | Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 }
 
 export function computeEventRevenue(
@@ -177,6 +197,8 @@ export function computeEventRevenue(
     const proceeds = new MeasureSum();
     const last7Gross = new MeasureSum();
     let last7Paid = 0;
+    const daily = new Map<string, DailySales>();
+    const tz = opts.timeZone ?? "America/Los_Angeles";
     // Internal check: order-level gross vs sum of ticket-line gross for
     // completed orders that have no refunded/cancelled lines.
     let checkOrderGross: number | null = 0;
@@ -274,6 +296,18 @@ export function computeEventRevenue(
       }
       proceeds.add(orderProceeds);
 
+      if (o.createdAt) {
+        const date = localDate(o.createdAt, tz);
+        const d = daily.get(date) ?? { date, paidTickets: 0, grossAfterRefundsMinor: 0 };
+        for (const l of ls) {
+          if (l.status === "active" && !(l.grossMinor === 0 && (l.basePriceMinor === 0 || l.basePriceMinor === null))) d.paidTickets += l.quantity;
+        }
+        let net: number | null = o.grossMinor;
+        for (const l of refundedLines) net = net === null || l.grossMinor === null ? null : net - l.grossMinor;
+        d.grossAfterRefundsMinor = d.grossAfterRefundsMinor === null || net === null ? null : d.grossAfterRefundsMinor + net;
+        daily.set(date, d);
+      }
+
       if (o.createdAt && Date.parse(o.createdAt) >= since && Date.parse(o.createdAt) <= opts.asOf.getTime()) {
         last7Gross.add(o.grossMinor);
         for (const l of ls) {
@@ -334,6 +368,7 @@ export function computeEventRevenue(
         cashRemitted: unavailable(MEASURE_DEFINITIONS.cashRemitted.definition),
       },
       last7Days: { paidTickets: last7Paid, grossSales: last7Gross.result() },
+      dailySales: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)),
       reconciliation,
     });
   }

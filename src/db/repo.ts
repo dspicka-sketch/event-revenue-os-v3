@@ -41,6 +41,7 @@ export interface MappingRow {
   provider_account_id: string;
   source_event_id: string;
   canonical_event_id: string;
+  venue_timezone: string;
 }
 
 // ---------------------------------------------------------------- setup
@@ -104,7 +105,7 @@ export async function getConnection(db: Queryable, orgId: string, connectionId: 
 export async function getEventMapping(db: Queryable, orgId: string, canonicalEventId: string): Promise<{ mapping: MappingRow; connection: ConnectionRow } | null> {
   const m = (
     await db.query<MappingRow>(
-      "SELECT id, organization_id, connection_id, provider, provider_account_id, source_event_id, canonical_event_id FROM source_event_mappings WHERE organization_id = $1 AND canonical_event_id = $2 ORDER BY ingested_at LIMIT 1",
+      "SELECT m.id, m.organization_id, m.connection_id, m.provider, m.provider_account_id, m.source_event_id, m.canonical_event_id, e.venue_timezone FROM source_event_mappings m JOIN canonical_events e ON e.id = m.canonical_event_id AND e.organization_id = m.organization_id WHERE m.organization_id = $1 AND m.canonical_event_id = $2 ORDER BY m.ingested_at LIMIT 1",
       [orgId, canonicalEventId],
     )
   ).rows[0];
@@ -388,6 +389,69 @@ export async function ticketClassBreakdown(db: Queryable, orgId: string, eventId
          AND o.status IN ('completed', 'refunded')
        GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`,
       [orgId, eventId],
+    )
+  ).rows;
+}
+
+// ---------------------------------------------------------------- targets
+
+export interface TargetRow {
+  canonical_event_id: string;
+  measure: "paidTickets" | "grossAfterRefunds" | "organizerProceeds";
+  target_value: number;
+  currency: string | null;
+  source: "manual";
+  updated_at: Date;
+}
+
+export async function listTargets(db: Queryable, orgId: string): Promise<TargetRow[]> {
+  return (
+    await db.query<TargetRow>(
+      "SELECT canonical_event_id, measure, target_value, trim(currency) AS currency, source, updated_at FROM event_targets WHERE organization_id = $1 ORDER BY measure",
+      [orgId],
+    )
+  ).rows;
+}
+
+export async function upsertTarget(
+  db: Queryable,
+  orgId: string,
+  eventId: string,
+  t: { measure: TargetRow["measure"]; value: number; currency: string | null },
+  userId: string,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO event_targets (organization_id, canonical_event_id, measure, target_value, currency, updated_by)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (organization_id, canonical_event_id, measure) DO UPDATE SET
+       target_value = EXCLUDED.target_value, currency = EXCLUDED.currency, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [orgId, eventId, t.measure, t.value, t.currency, userId],
+  );
+}
+
+export async function deleteTarget(db: Queryable, orgId: string, eventId: string, measure: string): Promise<void> {
+  await db.query("DELETE FROM event_targets WHERE organization_id = $1 AND canonical_event_id = $2 AND measure = $3", [orgId, eventId, measure]);
+}
+
+// ---------------------------------------------------------------- integrations
+
+export interface ConnectionSummaryRow extends ConnectionRow {
+  mapped_events: number;
+  last_run_status: string | null;
+  last_run_at: Date | null;
+}
+
+export async function listConnections(db: Queryable, orgId: string): Promise<ConnectionSummaryRow[]> {
+  return (
+    await db.query<ConnectionSummaryRow>(
+      `SELECT c.*,
+              (SELECT count(*)::int FROM source_event_mappings m WHERE m.organization_id = c.organization_id AND m.connection_id = c.id) AS mapped_events,
+              sr.status AS last_run_status, sr.started_at AS last_run_at
+       FROM source_connections c
+       LEFT JOIN LATERAL (SELECT status, started_at FROM sync_runs s WHERE s.organization_id = c.organization_id AND s.connection_id = c.id
+                          ORDER BY started_at DESC LIMIT 1) sr ON true
+       WHERE c.organization_id = $1 ORDER BY c.provider, c.provider_account_id`,
+      [orgId],
     )
   ).rows;
 }
