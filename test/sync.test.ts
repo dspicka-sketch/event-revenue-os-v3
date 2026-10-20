@@ -28,7 +28,7 @@ describeDb("sync (database)", () => {
 
   beforeEach(async () => {
     db ??= await freshDb();
-    await db.query("TRUNCATE organizations CASCADE");
+    await db.query("TRUNCATE organizations, users CASCADE");
     data = pilotFixture();
     failure = undefined;
   });

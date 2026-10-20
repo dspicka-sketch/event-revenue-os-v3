@@ -9,6 +9,6 @@ export const describeDb = TEST_DB_URL ? (await import("vitest")).describe : (awa
 export async function freshDb(): Promise<Db> {
   const db = createPool(TEST_DB_URL);
   await migrate(db);
-  await db.query("TRUNCATE organizations CASCADE");
+  await db.query("TRUNCATE organizations, users CASCADE");
   return db;
 }
