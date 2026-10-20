@@ -153,7 +153,7 @@ export function buildShowCard(input: ShowInput, now: Date, opts: { staleAfterHou
   }
   const reviewable = (input.revenue?.exceptions ?? []).filter((e) => e.severity !== "info");
   if (reviewable.length > 0) {
-    attention.push({ code: "review_exceptions", severity: reviewable.some((e) => e.severity === "error") ? "error" : "info", title: `${reviewable.length} record${reviewable.length > 1 ? "s" : ""} to review`, detail: "Refunds, status changes or mismatches flagged during reconciliation. Details on desktop." });
+    attention.push({ code: "review_exceptions", severity: reviewable.some((e) => e.severity === "error") ? "error" : "info", title: `${reviewable.length} record${reviewable.length > 1 ? "s" : ""} to review`, detail: "Refunds, status changes or mismatches flagged during reconciliation. Listed under Exceptions on the desktop show page." });
   }
   if (primary?.tickets.partial) {
     attention.push({ code: "counts_partial", severity: "warning", title: "Ticket counts incomplete", detail: "Some orders arrived without ticket detail." });

@@ -1,27 +1,40 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { CurrencyRevenue, ReconciliationRow, RevenueException } from "../domain/revenue.js";
-import type { Measure } from "../domain/money.js";
-import { api, ApiError, setToken, type EventDetail, type EventDto, type Organization } from "./api.js";
+import { currencyScale, type Measure } from "../domain/money.js";
+import { TARGET_LABELS, type AttentionItem, type ShowCard, type TargetProgress } from "../domain/pulse.js";
+import {
+  api, ApiError, getToken, setToken,
+  type ConnectionsResponse, type EventDetailResponse, type EventDto, type MeResponse, type Organization, type PulseResponse, type TargetMeasure,
+} from "./api.js";
 import { fmtDateTime, fmtMeasure, fmtRelative, formatMoney } from "./format.js";
+import { PaceChart } from "./PaceChart.js";
 
 // ------------------------------------------------------------------ routing
 
-type Route = { page: "home" } | { page: "org"; orgId: string } | { page: "event"; orgId: string; eventId: string };
+type Route =
+  | { page: "home" }
+  | { page: "org"; orgId: string }
+  | { page: "integrations"; orgId: string }
+  | { page: "event"; orgId: string; eventId: string };
 
 function parseRoute(path: string): Route {
-  const m = path.match(/^\/orgs\/([^/]+)(?:\/events\/([^/]+))?\/?$/);
+  let m = path.match(/^\/orgs\/([^/]+)\/integrations\/?$/);
+  if (m) return { page: "integrations", orgId: m[1]! };
+  m = path.match(/^\/orgs\/([^/]+)(?:\/events\/([^/]+))?\/?$/);
   if (!m) return { page: "home" };
   return m[2] ? { page: "event", orgId: m[1]!, eventId: m[2] } : { page: "org", orgId: m[1]! };
 }
 
-function useRoute(): [Route, (to: string, replace?: boolean) => void] {
+type Go = (to: string, replace?: boolean) => void;
+
+function useRoute(): [Route, Go] {
   const [route, setRoute] = useState(() => parseRoute(location.pathname));
   useEffect(() => {
     const on = () => setRoute(parseRoute(location.pathname));
     addEventListener("popstate", on);
     return () => removeEventListener("popstate", on);
   }, []);
-  const go = useCallback((to: string, replace = false) => {
+  const go = useCallback<Go>((to, replace = false) => {
     if (replace) history.replaceState(null, "", to);
     else history.pushState(null, "", to);
     setRoute(parseRoute(to));
@@ -30,9 +43,10 @@ function useRoute(): [Route, (to: string, replace?: boolean) => void] {
   return [route, go];
 }
 
-function Link({ to, go, children, className }: { to: string; go: (to: string) => void; children: ReactNode; className?: string }) {
+function Link({ to, go, children, className, current }: { to: string; go: Go; children: ReactNode; className?: string; current?: boolean }) {
   return (
-    <a href={to} className={className} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); go(to); }}>
+    <a href={to} className={className} aria-current={current ? "page" : undefined}
+      onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); go(to); }}>
       {children}
     </a>
   );
@@ -42,18 +56,20 @@ function Link({ to, go, children, className }: { to: string; go: (to: string) =>
 
 export function App() {
   const [route, go] = useRoute();
-  const [orgs, setOrgs] = useState<Organization[] | null>(null);
-  const [needsAuth, setNeedsAuth] = useState(false);
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [signedOut, setSignedOut] = useState(!getToken());
   const [error, setError] = useState<string | null>(null);
 
-  const loadOrgs = useCallback(() => {
-    api.orgs().then((r) => { setOrgs(r.organizations); setNeedsAuth(false); setError(null); }).catch((e) => {
-      if (e instanceof ApiError && e.status === 401) setNeedsAuth(true);
+  const loadMe = useCallback(() => {
+    api.me().then((r) => { setMe(r); setSignedOut(false); setError(null); }).catch((e) => {
+      if (e instanceof ApiError && e.status === 401) { setToken(null); setSignedOut(true); }
       else setError(e instanceof Error ? e.message : String(e));
     });
   }, []);
-  useEffect(loadOrgs, [loadOrgs]);
+  useEffect(() => { if (!signedOut) loadMe(); }, [signedOut, loadMe]);
+  const onAuthLost = useCallback(() => { setToken(null); setMe(null); setSignedOut(true); }, []);
 
+  const orgs = me?.organizations ?? null;
   useEffect(() => {
     if (route.page === "home" && orgs && orgs.length > 0) {
       const preferred = orgs.find((o) => !o.is_fixture) ?? orgs[0]!;
@@ -61,8 +77,15 @@ export function App() {
     }
   }, [route, orgs, go]);
 
+  const signOut = async () => {
+    await api.logout().catch(() => undefined);
+    onAuthLost();
+  };
+
   const orgId = route.page === "home" ? null : route.orgId;
   const org = orgs?.find((o) => o.id === orgId) ?? null;
+
+  if (signedOut) return <div className="shell"><header className="topbar"><span className="brand">RevOS</span></header><main><LoginForm onDone={() => setSignedOut(false)} /></main></div>;
 
   return (
     <div className={org?.is_fixture ? "shell fixture" : "shell"}>
@@ -77,16 +100,26 @@ export function App() {
             </select>
           </label>
         )}
+        {org && (
+          <nav className="tabs" aria-label="Sections">
+            <Link to={`/orgs/${org.id}`} go={go} current={route.page === "org" || route.page === "event"}>Shows</Link>
+            <Link to={`/orgs/${org.id}/integrations`} go={go} current={route.page === "integrations"}>Integrations</Link>
+          </nav>
+        )}
+        <span className="spacer" />
+        {me && <span className="small muted user">{me.user.email}</span>}
+        <button className="link" onClick={signOut}>Sign out</button>
       </header>
       {org?.is_fixture && <FixtureBanner />}
       {org && !org.is_fixture && <div className="mode-strip live" role="note">LIVE organization — data read from connected sources</div>}
       <main id="main">
-        {needsAuth ? <TokenForm onDone={loadOrgs} />
-          : error ? <ErrorBox title="Could not reach the RevOS server" detail={error} />
+        {error ? <ErrorBox title="Could not reach the RevOS server" detail={error} />
           : orgs === null ? <p className="muted">Loading…</p>
           : orgs.length === 0 ? <EmptySetup />
-          : route.page === "org" ? <EventList orgId={route.orgId} go={go} onAuth={() => setNeedsAuth(true)} />
-          : route.page === "event" ? <EventPage orgId={route.orgId} eventId={route.eventId} go={go} onAuth={() => setNeedsAuth(true)} />
+          : !org && route.page !== "home" ? <ErrorBox title="Organization not found" detail="It does not exist or you are not a member." />
+          : route.page === "org" ? <EventList org={org!} go={go} onAuth={onAuthLost} />
+          : route.page === "event" ? <EventPage org={org!} eventId={route.eventId} go={go} onAuth={onAuthLost} />
+          : route.page === "integrations" ? <IntegrationsPage org={org!} onAuth={onAuthLost} />
           : null}
       </main>
     </div>
@@ -101,16 +134,35 @@ function FixtureBanner() {
   );
 }
 
-function TokenForm({ onDone }: { onDone: () => void }) {
-  const [value, setValue] = useState("");
-  const submit = (e: FormEvent) => { e.preventDefault(); setToken(value.trim() || null); onDone(); };
+function LoginForm({ onDone }: { onDone: () => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.login(email, password);
+      setToken(r.token);
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <form className="card narrow" onSubmit={submit}>
-      <h1>Private access</h1>
-      <p>This RevOS server requires an access token. It is kept only for this browser tab.</p>
-      <label htmlFor="tok">Access token</label>
-      <input id="tok" type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} />
-      <button type="submit" className="primary">Continue</button>
+      <h1>Sign in</h1>
+      <p className="muted small">The same account works in the RevOS mobile app.</p>
+      <label htmlFor="email">Email</label>
+      <input id="email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
+      <label htmlFor="pw">Password</label>
+      <input id="pw" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <button type="submit" className="primary" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
     </form>
   );
 }
@@ -119,7 +171,7 @@ function EmptySetup() {
   return (
     <div className="card narrow">
       <h1>No organizations yet</h1>
-      <p>Create the isolated fixture demo with <code>npm run seed:fixture</code>, or register the live pilot event with <code>npm run setup:live</code> (see README).</p>
+      <p>Your account is not a member of any organization. An administrator can grant access with <code>npm run user -- grant</code> (see README).</p>
     </div>
   );
 }
@@ -148,7 +200,7 @@ function useLoad<T>(load: () => Promise<T>, onAuth: () => void, deps: unknown[])
   return { data, error, reload };
 }
 
-// ------------------------------------------------------------------ status badges
+// ------------------------------------------------------------------ shared bits
 
 const STATUS_LABEL: Record<string, string> = {
   not_configured: "Not configured",
@@ -172,25 +224,71 @@ function MeasureStatusTag({ m }: { m: Measure }) {
   );
 }
 
-// ------------------------------------------------------------------ event list
+const SEVERITY_ICON: Record<AttentionItem["severity"], string> = { error: "⛔", warning: "⚠", info: "ℹ" };
 
-function EventList({ orgId, go, onAuth }: { orgId: string; go: (to: string) => void; onAuth: () => void }) {
-  const { data, error } = useLoad(() => api.events(orgId), onAuth, [orgId]);
-  if (error) return <ErrorBox title="Could not load events" detail={error} />;
+function AttentionList({ items }: { items: AttentionItem[] }) {
+  if (items.length === 0) return <p className="muted small">Nothing needs attention.</p>;
+  return (
+    <ul className="attention">
+      {items.map((a, i) => (
+        <li key={i} className={`sev-${a.severity}`}>
+          <span className={`tag sev ${a.severity}`}><span aria-hidden="true">{SEVERITY_ICON[a.severity]}</span> {a.severity}</span>{" "}
+          <strong>{a.title}</strong>
+          <div className="small">{a.detail}</div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const TARGET_STATUS: Record<TargetProgress["status"], string> = { met: "Met", on_track: "On track", behind: "Behind", missed: "Missed", unknown: "Not judged" };
+
+function fmtTargetValue(t: { unit: "count" | "money"; currency: string | null }, v: number | null): string {
+  if (v === null) return "Unavailable";
+  return t.unit === "count" ? v.toLocaleString("en-US") : formatMoney(v, t.currency ?? "USD");
+}
+
+function TargetBar({ t }: { t: TargetProgress }) {
+  const pct = Math.min(100, t.percent ?? 0);
+  return (
+    <div className="target">
+      <div className="target-head">
+        <span>{t.label}</span>
+        <span className={`tag t-${t.status}`}>{TARGET_STATUS[t.status]}</span>
+      </div>
+      <div className="meter" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={t.percent ?? undefined} aria-label={`${t.label}: ${t.percent ?? "unknown"} percent of target`}>
+        <div className={`meter-fill t-${t.status}`} style={{ width: `${pct}%` }} />
+      </div>
+      <div className="small muted">
+        {fmtTargetValue(t, t.actual)} of {fmtTargetValue(t, t.target)}{t.percent !== null ? ` · ${t.percent}%` : ""}
+        {t.actualStatus === "partial" ? " · actual partial" : ""} · manual target
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ show list
+
+function EventList({ org, go, onAuth }: { org: Organization; go: Go; onAuth: () => void }) {
+  const { data, error } = useLoad(() => Promise.all([api.events(org.id), api.pulse(org.id)]), onAuth, [org.id]);
+  if (error) return <ErrorBox title="Could not load shows" detail={error} />;
   if (!data) return <p className="muted">Loading…</p>;
-  const tz = data.organization.timezone;
+  const [ev, pulse] = data;
+  const cards = new Map(pulse.shows.map((s) => [s.id, s]));
+  const tz = org.timezone;
   return (
     <section>
       <div className="page-head">
-        <h1>{data.organization.name}</h1>
-        <p className="muted">Performance dates in {tz}. "Last 7 days" uses transaction (sales) date. Totals are per currency and never combined.</p>
+        <h1>{org.name}</h1>
+        <p className="muted">Performance dates in {tz}. "Last 7 days" uses sale date. Totals are per currency and never combined.</p>
       </div>
-      {data.events.length === 0 ? (
-        <div className="card"><p>No events mapped for this organization yet.</p></div>
+      <PulseSummary pulse={pulse} />
+      {ev.events.length === 0 ? (
+        <div className="card"><p>No shows are mapped for this organization yet. See Integrations.</p></div>
       ) : (
         <div className="table-wrap">
           <table className="data">
-            <caption className="sr-only">Events</caption>
+            <caption className="sr-only">Shows</caption>
             <thead>
               <tr>
                 <th scope="col">Show / performance</th>
@@ -198,13 +296,13 @@ function EventList({ orgId, go, onAuth }: { orgId: string; go: (to: string) => v
                 <th scope="col" className="num">Net paid tickets</th>
                 <th scope="col" className="num">Gross after refunds</th>
                 <th scope="col" className="num">Organizer proceeds</th>
-                <th scope="col" className="num">Last 7 days (paid tickets)</th>
+                <th scope="col">Target</th>
+                <th scope="col" className="num">Last 7 days</th>
+                <th scope="col">Attention</th>
                 <th scope="col">Data freshness</th>
               </tr>
             </thead>
-            <tbody>
-              {data.events.flatMap((e) => eventRows(e, tz, go, orgId))}
-            </tbody>
+            <tbody>{ev.events.flatMap((e) => eventRows(e, cards.get(e.id), tz, go, org.id))}</tbody>
           </table>
         </div>
       )}
@@ -212,16 +310,34 @@ function EventList({ orgId, go, onAuth }: { orgId: string; go: (to: string) => v
   );
 }
 
-function eventRows(e: EventDto, tz: string, go: (to: string) => void, orgId: string) {
+function PulseSummary({ pulse }: { pulse: PulseResponse }) {
+  const s = pulse.summary;
+  return (
+    <div className="tiles summary">
+      <Tile label="Upcoming shows" value={String(s.upcomingShows)} />
+      <Tile label="Paid tickets, last 7 days" value={s.paidTicketsLast7Days.toLocaleString("en-US")} hint="All shows, by sale date" />
+      {s.upcomingGrossByCurrency.map((g) => (
+        <Tile key={g.currency} label={`Upcoming gross after refunds (${g.currency})`} value={g.minor === null ? "Unavailable" : formatMoney(g.minor, g.currency)} hint={g.status === "complete" ? "Before fees and tax" : `${g.status}; before fees and tax`} />
+      ))}
+      <Tile label="Shows needing attention" value={String(s.showsNeedingAttention)} hint="Warnings or errors" />
+    </div>
+  );
+}
+
+function eventRows(e: EventDto, card: ShowCard | undefined, tz: string, go: Go, orgId: string) {
   const currencies = e.revenue?.currencies ?? [];
   const link = <Link to={`/orgs/${orgId}/events/${e.id}`} go={go}>{e.source.sourceName ?? e.name}</Link>;
   const fresh = <Freshness e={e} />;
+  const top = card?.attention.find((a) => a.severity !== "info") ?? card?.attention[0];
+  const attention = top ? <span className={`tag sev ${top.severity}`} title={top.detail}><span aria-hidden="true">{SEVERITY_ICON[top.severity]}</span> {top.title}{card!.attention.length > 1 ? ` +${card!.attention.length - 1}` : ""}</span> : <span className="muted small">—</span>;
+  const target = card?.targets[0] ? <span className={`tag t-${card.targets[0].status}`}>{card.targets[0].percent ?? "?"}% · {TARGET_STATUS[card.targets[0].status]}</span> : <span className="muted small">None</span>;
   if (currencies.length === 0) {
     return [
       <tr key={e.id}>
         <th scope="row">{link}</th>
         <td>{fmtDateTime(e.performanceStartUtc, tz)}</td>
-        <td colSpan={4} className="muted">No data yet — open the show and use Refresh.</td>
+        <td colSpan={5} className="muted">No data yet — open the show and use Refresh.</td>
+        <td>{attention}</td>
         <td>{fresh}</td>
       </tr>,
     ];
@@ -233,7 +349,9 @@ function eventRows(e: EventDto, tz: string, go: (to: string) => void, orgId: str
       <td className="num">{c.tickets.paid}{c.tickets.partial ? "+" : ""}</td>
       <td className="num">{fmtMeasure(c.measures.grossAfterRefunds, c.currency)} <MeasureStatusTag m={c.measures.grossAfterRefunds} /></td>
       <td className="num">{fmtMeasure(c.measures.organizerProceeds, c.currency)} <MeasureStatusTag m={c.measures.organizerProceeds} /></td>
+      <td>{i === 0 ? target : ""}</td>
       <td className="num">{c.last7Days.paidTickets}</td>
+      <td>{i === 0 ? attention : ""}</td>
       <td>{i === 0 ? fresh : ""}</td>
     </tr>
   ));
@@ -248,10 +366,10 @@ function Freshness({ e }: { e: EventDto }) {
   );
 }
 
-// ------------------------------------------------------------------ event detail
+// ------------------------------------------------------------------ show detail
 
-function EventPage({ orgId, eventId, go, onAuth }: { orgId: string; eventId: string; go: (to: string) => void; onAuth: () => void }) {
-  const { data, error, reload } = useLoad(() => api.event(orgId, eventId), onAuth, [orgId, eventId]);
+function EventPage({ org, eventId, go, onAuth }: { org: Organization; eventId: string; go: Go; onAuth: () => void }) {
+  const { data, error, reload } = useLoad(() => api.event(org.id, eventId), onAuth, [org.id, eventId]);
   const [busy, setBusy] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<{ ok: boolean; text: string; action?: string } | null>(null);
 
@@ -259,7 +377,7 @@ function EventPage({ orgId, eventId, go, onAuth }: { orgId: string; eventId: str
     setBusy(true);
     setRefreshMsg(null);
     try {
-      await api.refresh(orgId, eventId);
+      await api.refresh(org.id, eventId);
       setRefreshMsg({ ok: true, text: "Refresh completed." });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onAuth();
@@ -273,16 +391,16 @@ function EventPage({ orgId, eventId, go, onAuth }: { orgId: string; eventId: str
 
   if (error) return <ErrorBox title="Could not load this show" detail={error} />;
   if (!data) return <p className="muted">Loading…</p>;
-  const { event: e, organization: org } = data;
+  const { event: e, card } = data;
   const tz = e.venueTimezone;
 
   return (
     <section>
-      <nav className="crumbs" aria-label="Breadcrumb"><Link to={`/orgs/${orgId}`} go={go}>← {org.name}</Link></nav>
+      <nav className="crumbs" aria-label="Breadcrumb"><Link to={`/orgs/${org.id}`} go={go}>← {org.name}</Link></nav>
       <div className="page-head with-action">
         <div>
           <h1>{e.source.sourceName ?? e.name}</h1>
-          <p className="muted">Performance: {fmtDateTime(e.performanceStartUtc, tz)} · Eventbrite event {e.source.sourceEventId}</p>
+          <p className="muted">Performance: {fmtDateTime(e.performanceStartUtc, tz)}{card.daysUntil !== null && card.daysUntil > 0 ? ` · in ${card.daysUntil} days` : ""} · Eventbrite event {e.source.sourceEventId}</p>
         </div>
         <button className="primary" onClick={refresh} disabled={busy} aria-busy={busy}>{busy ? "Refreshing…" : "Refresh"}</button>
       </div>
@@ -294,6 +412,16 @@ function EventPage({ orgId, eventId, go, onAuth }: { orgId: string; eventId: str
 
       <SyncStatus e={e} tz={tz} />
 
+      <div className="two-col">
+        <section className="card" aria-labelledby="att-h">
+          <h2 id="att-h" className="card-title">Needs attention</h2>
+          <AttentionList items={card.attention} />
+        </section>
+        <TargetsPanel org={org} eventId={eventId} card={card} onSaved={reload} onAuth={onAuth} />
+      </div>
+
+      {card.pace && <div className="card"><PaceChart days={card.pace.days} currency={card.currency} /></div>}
+
       {!e.revenue ? (
         <div className="card"><p>No data has been read for this show yet. Use <strong>Refresh</strong> to run the first read.</p></div>
       ) : (
@@ -303,6 +431,76 @@ function EventPage({ orgId, eventId, go, onAuth }: { orgId: string; eventId: str
       {e.revenue && <Exceptions list={e.revenue.exceptions} />}
       <TicketClasses rows={data.ticketClasses} />
       <SyncHistory runs={data.syncRuns} tz={tz} />
+    </section>
+  );
+}
+
+function TargetsPanel({ org, eventId, card, onSaved, onAuth }: { org: Organization; eventId: string; card: ShowCard; onSaved: () => void; onAuth: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [measure, setMeasure] = useState<TargetMeasure>("paidTickets");
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const currency = card.currency ?? "USD";
+  const isCount = measure === "paidTickets";
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    // Parse money as a decimal string into integer minor units (no floats).
+    const trimmed = value.trim().replace(/,/g, "");
+    let minor: number;
+    if (isCount) {
+      if (!/^\d+$/.test(trimmed)) return setError("Enter a whole number of tickets.");
+      minor = Number(trimmed);
+    } else {
+      const scale = currencyScale(currency);
+      const m = trimmed.match(scale > 0 ? new RegExp(`^(\\d+)(?:\\.(\\d{1,${scale}}))?$`) : /^(\d+)$/);
+      if (!m) return setError(scale > 0 ? "Enter an amount like 18000 or 18000.50." : "Enter a whole amount.");
+      minor = Number(m[1]) * 10 ** scale + Number((m[2] ?? "").padEnd(scale, "0") || "0");
+    }
+    try {
+      await api.setTarget(org.id, eventId, { measure, value: minor, currency: isCount ? null : currency });
+      setEditing(false);
+      setValue("");
+      onSaved();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return onAuth();
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const remove = async (m: TargetMeasure) => {
+    await api.deleteTarget(org.id, eventId, m).catch(() => undefined);
+    onSaved();
+  };
+
+  return (
+    <section className="card" aria-labelledby="tgt-h">
+      <div className="card-title-row">
+        <h2 id="tgt-h" className="card-title">Targets</h2>
+        {org.role === "admin" && !editing && <button className="link" onClick={() => setEditing(true)}>Set target</button>}
+      </div>
+      {card.targets.length === 0 && !editing && <p className="muted small">No targets set. Targets are plan values entered here until a planning integration (Airtable, M5) supplies them.</p>}
+      {card.targets.map((t) => (
+        <div key={t.measure} className="target-row">
+          <TargetBar t={t} />
+          {org.role === "admin" && <button className="link small" onClick={() => remove(t.measure)} aria-label={`Remove ${t.label} target`}>Remove</button>}
+        </div>
+      ))}
+      {editing && (
+        <form className="target-form" onSubmit={save}>
+          <label htmlFor="tm">Measure</label>
+          <select id="tm" value={measure} onChange={(e) => setMeasure(e.target.value as TargetMeasure)}>
+            {(Object.keys(TARGET_LABELS) as TargetMeasure[]).map((m) => <option key={m} value={m}>{TARGET_LABELS[m]}</option>)}
+          </select>
+          <label htmlFor="tv">{isCount ? "Tickets" : `Amount (${currency})`}</label>
+          <input id="tv" inputMode={isCount ? "numeric" : "decimal"} value={value} onChange={(e) => setValue(e.target.value)} required />
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <div className="row">
+            <button type="submit" className="primary">Save target</button>
+            <button type="button" className="link" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </form>
+      )}
     </section>
   );
 }
@@ -331,7 +529,7 @@ function SyncStatus({ e, tz }: { e: EventDto; tz: string }) {
 
 const MEASURE_ORDER = ["grossSales", "refunds", "grossAfterRefunds", "ticketFaceValue", "platformFees", "paymentFees", "tax", "discounts", "organizerProceeds", "cashRemitted"] as const;
 
-function CurrencySection({ c, defs, stale, comparison }: { c: CurrencyRevenue; defs: EventDetail["definitions"]; stale: boolean; comparison: ReconciliationRow[] | null }) {
+function CurrencySection({ c, defs, stale, comparison }: { c: CurrencyRevenue; defs: EventDetailResponse["definitions"]; stale: boolean; comparison: ReconciliationRow[] | null }) {
   const reportRows = (comparison ?? []).filter((r) => r.key.startsWith("report_"));
   return (
     <section className="currency" aria-labelledby={`cur-${c.currency}`}>
@@ -426,7 +624,7 @@ function Exceptions({ list }: { list: RevenueException[] }) {
   );
 }
 
-function TicketClasses({ rows }: { rows: EventDetail["ticketClasses"] }) {
+function TicketClasses({ rows }: { rows: EventDetailResponse["ticketClasses"] }) {
   if (rows.length === 0) return null;
   return (
     <section>
@@ -451,7 +649,7 @@ function TicketClasses({ rows }: { rows: EventDetail["ticketClasses"] }) {
   );
 }
 
-function SyncHistory({ runs, tz }: { runs: EventDetail["syncRuns"]; tz: string }) {
+function SyncHistory({ runs, tz }: { runs: EventDetailResponse["syncRuns"]; tz: string }) {
   if (runs.length === 0) return null;
   return (
     <section>
@@ -473,5 +671,87 @@ function SyncHistory({ runs, tz }: { runs: EventDetail["syncRuns"]; tz: string }
         </table>
       </div>
     </section>
+  );
+}
+
+// ------------------------------------------------------------------ integrations
+
+function IntegrationsPage({ org, onAuth }: { org: Organization; onAuth: () => void }) {
+  const { data, error, reload } = useLoad(() => api.connections(org.id), onAuth, [org.id]);
+  const [results, setResults] = useState<Record<string, { ok: boolean; text: string }>>({});
+  if (error) return <ErrorBox title="Could not load integrations" detail={error} />;
+  if (!data) return <p className="muted">Loading…</p>;
+
+  const test = async (id: string) => {
+    setResults((r) => ({ ...r, [id]: { ok: true, text: "Testing…" } }));
+    try {
+      const out = await api.testConnection(org.id, id);
+      setResults((r) => ({ ...r, [id]: { ok: true, text: out.message } }));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return onAuth();
+      const body = e instanceof ApiError ? e.body : {};
+      setResults((r) => ({ ...r, [id]: { ok: false, text: `${String(body.message ?? (e as Error).message)} ${String(body.action ?? "")}` } }));
+    } finally {
+      reload();
+    }
+  };
+
+  return (
+    <section>
+      <div className="page-head">
+        <h1>Integrations</h1>
+        <p className="muted">All connections are read-only. Credentials live in the server's secret store; RevOS stores only the name of the secret.</p>
+      </div>
+      <ConnectionsTable data={data} results={results} canTest={org.role === "admin"} onTest={test} tz={org.timezone} />
+      <h2>Planned</h2>
+      <div className="planned">
+        {data.planned.map((p) => (
+          <div key={p.provider} className="card planned-card">
+            <strong>{p.label}</strong> <span className="tag">{p.milestone}</span>
+            <div className="small muted">{p.role}</div>
+            <div className="small">Not yet available</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ConnectionsTable({ data, results, canTest, onTest, tz }: {
+  data: ConnectionsResponse; results: Record<string, { ok: boolean; text: string }>; canTest: boolean; onTest: (id: string) => void; tz: string;
+}) {
+  if (data.connections.length === 0) return <div className="card"><p>No connections yet. Register the Eventbrite pilot with <code>npm run setup:live</code>.</p></div>;
+  return (
+    <div className="table-wrap">
+      <table className="data">
+        <thead>
+          <tr>
+            <th scope="col">Provider</th><th scope="col">Account</th><th scope="col">Status</th><th scope="col">Credential</th>
+            <th scope="col">Last attempt</th><th scope="col">Last success</th><th scope="col" className="num">Shows</th><th scope="col">Proceeds rule</th><th scope="col"><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.connections.map((c) => (
+            <tr key={c.id}>
+              <th scope="row">{c.provider === "eventbrite" ? "Eventbrite" : c.provider} {c.mode === "fixture" && <span className="tag fixture-tag">FIXTURE</span>}</th>
+              <td><code>{c.providerAccountId}</code></td>
+              <td>
+                <ConnectionBadge status={c.status} />
+                {c.action && <div className="small action">{c.action}</div>}
+              </td>
+              <td className="small">{c.mode === "fixture" ? "n/a (fixture)" : c.secretPresent ? <>Set on server (<code>{c.secretRef}</code>)</> : <span className="tag bad">Missing: {c.secretRef}</span>}</td>
+              <td className="small">{fmtDateTime(c.lastAttemptAt, tz)}</td>
+              <td className="small">{fmtDateTime(c.lastSuccessAt, tz)}</td>
+              <td className="num">{c.mappedEvents}</td>
+              <td className="small">{c.proceedsPolicy === "unverified" ? "Not derived (fee ownership unverified)" : "Gross − fees − tax"}</td>
+              <td>
+                {canTest && <button className="secondary" onClick={() => onTest(c.id)}>Test connection</button>}
+                {results[c.id] && <div className={`small ${results[c.id]!.ok ? "" : "form-error"}`} role="status">{results[c.id]!.text}</div>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

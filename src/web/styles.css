@@ -93,7 +93,7 @@ button.link { background: none; border: 0; color: var(--accent); padding: 4px 0;
 .tile-value { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .tile-hint { font-size: 0.75rem; color: var(--muted); }
 
-.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.table-wrap { position: relative; overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 table.data { width: 100%; border-collapse: collapse; }
 table.data th, table.data td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.data thead th { font-size: 0.8rem; color: var(--muted); font-weight: 600; background: var(--bg); }
@@ -111,3 +111,59 @@ ul.exceptions li:last-child { border-bottom: 0; }
   .tile-value { font-size: 1.3rem; }
   table.data th, table.data td { padding: 6px 8px; font-size: 0.85rem; }
 }
+
+/* --- v0.2: navigation, sign-in, attention, targets, pace chart, integrations --- */
+.topbar { flex-wrap: wrap; }
+.topbar .spacer { flex: 1; }
+.topbar .user { overflow: hidden; text-overflow: ellipsis; max-width: 30vw; white-space: nowrap; }
+.tabs { display: flex; gap: 4px; }
+.tabs a { padding: 6px 10px; border-radius: 6px; text-decoration: none; color: var(--muted); font-weight: 600; }
+.tabs a[aria-current="page"] { background: var(--info-bg); color: var(--info-fg); }
+.card label { display: block; font-weight: 600; font-size: 0.9rem; }
+.card select { display: block; width: 100%; font: inherit; padding: 8px; margin: 6px 0 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.form-error { color: var(--bad-fg); }
+button.secondary { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; padding: 6px 12px; font-weight: 600; }
+.row { display: flex; gap: 12px; align-items: center; }
+
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.two-col > .card { margin-bottom: 16px; }
+.card-title { margin: 0 0 10px; font-size: 1rem; }
+.card-title-row { display: flex; justify-content: space-between; align-items: baseline; }
+ul.attention { list-style: none; margin: 0; padding: 0; }
+ul.attention li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+ul.attention li:last-child { border-bottom: 0; }
+.tag.sev.info { background: var(--info-bg); color: var(--info-fg); }
+
+.target-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.target { flex: 1; }
+.target-head { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 4px; }
+.meter { height: 10px; border-radius: 5px; background: var(--info-bg); overflow: hidden; }
+.meter-fill { height: 100%; border-radius: 5px; background: var(--accent); }
+.meter-fill.t-behind, .meter-fill.t-missed { background: var(--warn-fg); }
+.meter-fill.t-met { background: var(--ok-fg); }
+.tag.t-met, .tag.t-on_track { background: var(--ok-bg); color: var(--ok-fg); }
+.tag.t-behind, .tag.t-missed { background: var(--warn-bg); color: var(--warn-fg); }
+.tag.t-unknown { background: var(--border); color: var(--text); }
+.target-form { margin-top: 8px; }
+
+.pace { margin: 0; }
+.pace figcaption { margin-bottom: 8px; }
+.pace-plot { position: relative; }
+.pace svg { width: 100%; height: auto; display: block; }
+.pace .grid { stroke: var(--border); stroke-width: 1; }
+.pace .axis { fill: var(--muted); font-size: 11px; }
+.pace .bar { fill: var(--chart-series-1); }
+.pace .bar.hover { opacity: 0.8; }
+.pace rect:focus { outline: none; }
+.pace rect:focus-visible { stroke: var(--accent); stroke-width: 2; }
+.tooltip { position: absolute; top: 0; transform: translateX(-50%); background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 0.8rem; pointer-events: none; white-space: nowrap; box-shadow: 0 2px 8px rgb(0 0 0 / 0.12); }
+table.data.compact th, table.data.compact td { padding: 4px 8px; }
+
+.planned { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.planned-card { margin: 0; }
+.tiles.summary { margin-bottom: 16px; }
+:root { --chart-series-1: #2a78d6; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --chart-series-1: #3987e5; } }
+:root[data-theme="dark"] { --chart-series-1: #3987e5; }
+table.data td .tag { white-space: normal; }
+main { max-width: 1320px; }
