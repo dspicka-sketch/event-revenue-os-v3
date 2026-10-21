@@ -111,19 +111,16 @@ export default function ShowScreen() {
 
         <Card>
           <Text style={{ color: t.text, fontWeight: "700", marginBottom: 8 }}>Revenue {cur ? `(${cur})` : ""}</Text>
-          {[
-            ["Gross buyer payments", rev?.measures.grossSales],
-            ["Refunds", rev?.measures.refunds],
-            ["Gross after refunds", rev?.measures.grossAfterRefunds],
-            ["Organizer proceeds", rev?.measures.organizerProceeds],
-          ].map(([label, m]) => (
-            <View key={label as string} style={[s.rowBetween, { paddingVertical: 6 }]}>
-              <Text style={{ color: t.text }}>{label as string}</Text>
-              <Text style={{ color: t.text, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{money(m as never)}</Text>
+          {(["ticketFaceValue", "facilityFees", "promoterRebates", "platformFees", "paymentFees", "tax", "grossSales", "refunds", "organizerProceeds"] as const).map((k) => (
+            <View key={k} style={[s.rowBetween, { paddingVertical: 5 }, k === "grossSales" || k === "organizerProceeds" ? { borderTopWidth: 1, borderTopColor: t.border, paddingTop: 8, marginTop: 4 } : null]}>
+              <Text style={{ color: t.text, fontWeight: k === "organizerProceeds" || k === "grossSales" ? "700" : "400" }}>
+                {k === "organizerProceeds" ? "House keeps" : data.definitions[k]?.label ?? k}
+              </Text>
+              <Text style={{ color: t.text, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{money(rev?.measures[k])}</Text>
             </View>
           ))}
           <Text style={{ color: t.muted, fontSize: 12, marginTop: 4 }}>
-            Gross includes fees and tax. Proceeds are shown only when fee ownership is verified for the source. Full definitions and reconciliation are on desktop.
+            Buyers pay every fee and the tax. The house keeps face value, facility fees and promoter rebates; platform and processing fees and tax pass through. Before refunds except "House keeps". Full definitions and reconciliation are on desktop.
           </Text>
           {card.otherCurrencies.length > 0 && <Text style={{ color: t.muted, fontSize: 12 }}>Also sold in {card.otherCurrencies.join(", ")} (not combined).</Text>}
         </Card>

@@ -540,7 +540,24 @@ function SyncStatus({ e, tz }: { e: EventDto; tz: string }) {
   );
 }
 
-const MEASURE_ORDER = ["grossSales", "refunds", "grossAfterRefunds", "ticketFaceValue", "platformFees", "paymentFees", "tax", "discounts", "organizerProceeds", "cashRemitted"] as const;
+type MeasureKey = keyof CurrencyRevenue["measures"];
+/** Revenue table layout: what the buyer paid, where each part goes, then refunds and what the house keeps (D15). */
+const MEASURE_GROUPS: { title: string; rows: { key: MeasureKey; goesTo?: string }[] }[] = [
+  {
+    title: "What buyers paid",
+    rows: [
+      { key: "ticketFaceValue", goesTo: "House" },
+      { key: "facilityFees", goesTo: "House (venue)" },
+      { key: "promoterRebates", goesTo: "House (promoter)" },
+      { key: "platformFees", goesTo: "Ticketing platform" },
+      { key: "paymentFees", goesTo: "Payment processor" },
+      { key: "tax", goesTo: "Tax authority" },
+      { key: "grossSales" },
+    ],
+  },
+  { title: "Refunds", rows: [{ key: "refunds" }, { key: "grossAfterRefunds" }] },
+  { title: "What the house keeps", rows: [{ key: "organizerProceeds" }, { key: "discounts" }, { key: "cashRemitted" }] },
+];
 
 function CurrencySection({ c, defs, stale, comparison, last7 }: { c: CurrencyRevenue; defs: EventDetailResponse["definitions"]; stale: boolean; comparison: ReconciliationRow[] | null; last7: number | null }) {
   const reportRows = (comparison ?? []).filter((r) => r.key.startsWith("report_"));
@@ -560,19 +577,23 @@ function CurrencySection({ c, defs, stale, comparison, last7 }: { c: CurrencyRev
       <h3>Revenue components</h3>
       <div className="table-wrap">
         <table className="data">
-          <thead><tr><th scope="col">Measure</th><th scope="col" className="num">Value</th><th scope="col">Definition and provenance</th></tr></thead>
-          <tbody>
-            {MEASURE_ORDER.map((k) => {
-              const m = c.measures[k];
-              return (
-                <tr key={k} className={k === "organizerProceeds" ? "emph" : undefined}>
-                  <th scope="row">{defs[k]?.label ?? k}</th>
-                  <td className="num">{fmtMeasure(m, c.currency)} <MeasureStatusTag m={m} /></td>
-                  <td className="small">{defs[k]?.definition}{m.note && m.note !== defs[k]?.definition ? <><br /><em>{m.note}</em></> : null}</td>
-                </tr>
-              );
-            })}
-          </tbody>
+          <thead><tr><th scope="col">Line</th><th scope="col" className="num">Amount</th><th scope="col">Goes to</th><th scope="col">Definition and provenance</th></tr></thead>
+          {MEASURE_GROUPS.map((g) => (
+            <tbody key={g.title}>
+              <tr className="group-row"><th scope="rowgroup" colSpan={4}>{g.title}</th></tr>
+              {g.rows.map(({ key: k, goesTo }) => {
+                const m = c.measures[k];
+                return (
+                  <tr key={k} className={k === "organizerProceeds" || k === "grossSales" ? "emph" : undefined}>
+                    <th scope="row">{defs[k]?.label ?? k}</th>
+                    <td className="num">{fmtMeasure(m, c.currency)} <MeasureStatusTag m={m} /></td>
+                    <td className="small">{goesTo ?? ""}</td>
+                    <td className="small">{defs[k]?.definition}{m.note && m.note !== defs[k]?.definition ? <><br /><em>{m.note}</em></> : null}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          ))}
         </table>
       </div>
       <p className="small muted">Orders: {c.orders.completed} completed, {c.orders.refunded} refunded, {c.orders.cancelled} cancelled, {c.orders.unpaid} unpaid{c.orders.other ? `, ${c.orders.other} unrecognised` : ""}. Source: Eventbrite order and attendee reads. Time window: all transactions for this performance.</p>
@@ -756,7 +777,7 @@ function ConnectionsTable({ data, results, canTest, onTest, tz }: {
               <td className="small">{fmtDateTime(c.lastAttemptAt, tz)}</td>
               <td className="small">{fmtDateTime(c.lastSuccessAt, tz)}</td>
               <td className="num">{c.mappedEvents}</td>
-              <td className="small">{c.proceedsPolicy === "unverified" ? "Not derived (fee ownership unverified)" : "Gross − fees − tax"}</td>
+              <td className="small">{c.proceedsPolicy === "unverified" ? "Not derived (fee ownership unverified)" : "Buyer pays all fees: house keeps face + facility + rebate"}</td>
               <td>
                 {canTest && <button className="secondary" onClick={() => onTest(c.id)}>Test connection</button>}
                 {results[c.id] && <div className={`small ${results[c.id]!.ok ? "" : "form-error"}`} role="status">{results[c.id]!.text}</div>}

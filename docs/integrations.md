@@ -62,7 +62,8 @@ A fixture test passing is not live verification.
 | `costs.eventbrite_fee` | Eventbrite service fee | ASSUMED |
 | `costs.payment_fee` | Payment processing fee | ASSUMED |
 | `costs.tax` | Tax collected | ASSUMED |
-| Fee payer | Depends on event/ticket-class settings (fees passed to buyer vs absorbed). **Not determined.** | ASSUMED |
+| Fee payer | **Buyer pays all fees and tax** (product owner, D15). The probe's fee-shape check confirms this per order on live data | OWNER-CONFIRMED; live check pending |
+| `costs.fee_components` | Itemized fees: `name`, `internal_name`, `group_name`, `value` (integer or money object), `recipient`, `payer`. Facility fee and promoter rebate are matched by name | ASSUMED; the probe lists real fee names |
 | Refund amounts | No refund-amount field identified. Full refund: order status `refunded`. Ticket-level: attendee `refunded`/`cancelled` flags. Whether order `costs` are reduced after a partial refund: **unknown** | ASSUMED |
 | Payouts | Not read in M1 | — |
 

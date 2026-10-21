@@ -68,6 +68,8 @@ export interface CurrencyRevenue {
     refunds: Measure;
     grossAfterRefunds: Measure;
     ticketFaceValue: Measure;
+    facilityFees: Measure;
+    promoterRebates: Measure;
     platformFees: Measure;
     paymentFees: Measure;
     tax: Measure;
@@ -106,7 +108,7 @@ export interface EventRevenue {
 /** Human definitions for every measure, shown in the UI next to the number. */
 export const MEASURE_DEFINITIONS: Record<keyof CurrencyRevenue["measures"], { label: string; definition: string }> = {
   grossSales: {
-    label: "Gross buyer payments",
+    label: "Buyer total (gross)",
     definition:
       "Order-level total paid by buyers (source 'gross') for completed and later-refunded orders, before refunds. Counted once per order, never per ticket. Not net revenue.",
   },
@@ -121,16 +123,24 @@ export const MEASURE_DEFINITIONS: Record<keyof CurrencyRevenue["measures"], { la
   },
   ticketFaceValue: {
     label: "Ticket face value",
-    definition: "Source 'base_price' summed per order, before refunds. Discount treatment is not yet verified.",
+    definition: "Ticket price before fees and tax (source 'base_price'), before refunds. Kept by the house. Discount treatment is not yet verified.",
   },
-  platformFees: { label: "Platform fees", definition: "Ticketing platform service fee (source 'eventbrite_fee'), before refunds. Payer (buyer vs organizer) depends on event settings." },
-  paymentFees: { label: "Payment processing fees", definition: "Payment processing fee (source 'payment_fee'), before refunds." },
-  tax: { label: "Tax", definition: "Tax collected (source 'tax'), before refunds." },
+  facilityFees: {
+    label: "Facility fees",
+    definition: "Venue facility fee paid by the buyer on top of the ticket price, before refunds. Kept by the house. Read from the source's itemized fees; unavailable when the source does not itemize them.",
+  },
+  promoterRebates: {
+    label: "Promoter rebates",
+    definition: "Per-ticket charge paid by the buyer and returned to the promoter, before refunds. Kept by the house. Read from the source's itemized fees; unavailable when the source does not itemize them.",
+  },
+  platformFees: { label: "Platform fees", definition: "Ticketing platform service fee (source 'eventbrite_fee'), paid by the buyer and passed through to the platform. Before refunds." },
+  paymentFees: { label: "Processing fees", definition: "Payment processing fee (source 'payment_fee'), paid by the buyer and passed through. Before refunds." },
+  tax: { label: "Tax", definition: "Tax paid by the buyer (source 'tax') and owed to the tax authority. Before refunds." },
   discounts: { label: "Discounts", definition: "Not separately reported by the connected source fields." },
   organizerProceeds: {
     label: "Organizer ticket proceeds",
     definition:
-      "Buyer gross minus platform fee, payment fee and tax, net of refunds — only when fee/tax ownership for this source has been documented. Before show operating expenses. Not cash received.",
+      "What the house keeps: face value + facility fees + promoter rebates, net of refunds. Equals buyer total minus the pass-through platform fee, processing fee and tax (buyer pays all fees, D15). Shown only when fee ownership is documented for the source. Before show operating expenses. Not cash received.",
   },
   cashRemitted: { label: "Cash remitted (payouts)", definition: "Payout data is not connected in this milestone." },
 };
@@ -197,6 +207,8 @@ export function computeEventRevenue(
     const gross = new MeasureSum();
     const refunds = new MeasureSum();
     const face = new MeasureSum();
+    const facility = new MeasureSum();
+    const rebate = new MeasureSum();
     const platform = new MeasureSum();
     const payment = new MeasureSum();
     const tax = new MeasureSum();
@@ -211,6 +223,10 @@ export function computeEventRevenue(
     let checkLineGross: number | null = 0;
     let checkOrders = 0;
     let checkMismatches = 0;
+    // Buyer total vs its itemized parts, for orders where every part is known.
+    let itemOrders = 0;
+    let itemGross = 0;
+    let itemParts = 0;
 
     for (const o of cOrders) {
       orderCounts[o.status]++;
@@ -243,9 +259,20 @@ export function computeEventRevenue(
         exceptions.push({ code: "order_without_lines", severity: "warning", orderSourceId: o.sourceId, message: "Sales order has no ticket lines from the source; ticket counts are incomplete." });
       }
 
+      if (o.status === "completed") {
+        const parts = [o.basePriceMinor, o.facilityFeeMinor, o.promoterRebateMinor, o.providerFeeMinor, o.paymentFeeMinor, o.taxMinor];
+        if (o.grossMinor !== null && parts.every((p) => p !== null)) {
+          itemOrders++;
+          itemGross += o.grossMinor;
+          itemParts += parts.reduce<number>((a, p) => a + p!, 0);
+        }
+      }
+
       // Order-level money: counted exactly once per order.
       gross.add(o.grossMinor);
       face.add(o.basePriceMinor);
+      facility.add(o.facilityFeeMinor);
+      rebate.add(o.promoterRebateMinor);
       platform.add(o.providerFeeMinor);
       payment.add(o.paymentFeeMinor);
       tax.add(o.taxMinor);
@@ -358,6 +385,22 @@ export function computeEventRevenue(
       });
     }
 
+    if (itemOrders > 0) {
+      const diff = itemGross - itemParts;
+      reconciliation.push({
+        key: "buyer_total_vs_items",
+        label: `Buyer total vs face value + facility fee + rebate + platform fee + processing fee + tax (${itemOrders} orders)`,
+        unit: "money",
+        left: { label: "Σ buyer total", minor: itemGross },
+        right: { label: "Σ itemized", minor: itemParts },
+        difference: diff,
+        explained: diff === 0,
+        explanation: diff === 0
+          ? "Every dollar the buyer paid is accounted for by a line item."
+          : "The buyer total includes an amount that is not itemized (for example an unrecognised fee). Check the source's fee names.",
+      });
+    }
+
     currencies.push({
       currency,
       scale: currencyScale(currency),
@@ -368,6 +411,8 @@ export function computeEventRevenue(
         refunds: refundsM,
         grossAfterRefunds: grossAfter,
         ticketFaceValue: face.result(),
+        facilityFees: facility.result(),
+        promoterRebates: rebate.result(),
         platformFees: platform.result(),
         paymentFees: payment.result(),
         tax: tax.result(),

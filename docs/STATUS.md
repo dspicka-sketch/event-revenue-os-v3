@@ -40,11 +40,16 @@ After reviewing the demo, Daniel chose marketing effectiveness as RevOS's lead (
 - **Mobile:** show cards lead with "Driving sales" (top 3); the show screen lists every source.
 - **Attention rules:** "most sales aren't linked to marketing" and "recent campaign with no linked orders".
 
+### Buyer-paid line items (D15, 2026-10-21)
+- Each show itemizes face value, facility fee, promoter rebate, platform fee, processing fee and tax, with a buyer-total check. The house keeps face + facility + rebate.
+- Facility fee and rebate come from the source's itemized fee list (Eventbrite `fee_components`, ASSUMED) and show as unavailable when it isn't itemized.
+- The fixture now carries a $2.00 facility fee, a $1.00 rebate and 8.75% tax per ticket.
+
 ## Verification actually performed (2026-10-21)
 
 | Check | Result |
 |---|---|
-| `npm run check` (local PostgreSQL 16) | typecheck OK; **94/94 tests** passed (money 6, revenue 13, pulse 10, marketing 8, marketing sync 4, Mailchimp 6, Eventbrite client 10, probe 4, DB sync 15, HTTP API 18); web build OK; secret/PII scan clean |
+| `npm run check` (local PostgreSQL 16) | typecheck OK; **102/102 tests** passed (money 6, revenue 13, fees 6, pulse 12, marketing 8, marketing sync 4, Mailchimp 6, Eventbrite client 10, probe 4, DB sync 15, HTTP API 18); web build OK; secret/PII scan clean |
 | Mobile `npm run typecheck` / `npm test` | OK / 6/6 passed |
 | `npx expo export --platform web` and `--platform ios` | Both bundles built (iOS Hermes bytecode, 2.7 MB), including the shared domain modules |
 | Desktop manual run (Playwright, 1280 px and 390 px) | sign-in → shows → show detail (pace tooltip) → integrations (test connection). No horizontal overflow at 390 px after fixing a hidden-header overflow bug |

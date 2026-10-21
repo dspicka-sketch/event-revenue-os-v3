@@ -24,7 +24,9 @@ try {
 
   let conn = (await db.query<{ id: string }>(
     "SELECT id FROM source_connections WHERE organization_id = $1 AND provider = 'eventbrite' AND provider_account_id = $2", [orgId, accountId])).rows[0];
-  if (!conn) conn = await createConnection(db, { organizationId: orgId, provider: "eventbrite", providerAccountId: accountId, mode: "live", secretRef: "EVENTBRITE_TOKEN" });
+  // D15: Daniel confirmed buyers pay platform, processing, facility, rebate and tax,
+  // so proceeds (face + facility + rebate) can be derived. The probe checks the fee shape.
+  if (!conn) conn = await createConnection(db, { organizationId: orgId, provider: "eventbrite", providerAccountId: accountId, mode: "live", secretRef: "EVENTBRITE_TOKEN", proceedsPolicy: "gross_minus_fees_and_tax" });
 
   const mapped = await db.query<{ canonical_event_id: string }>(
     "SELECT canonical_event_id FROM source_event_mappings WHERE organization_id = $1 AND provider = 'eventbrite' AND provider_account_id = $2 AND source_event_id = $3",

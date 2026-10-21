@@ -64,5 +64,12 @@ RevOS will not model guarantees, door splits or "versus" deals itself. Those liv
 - Prism.fm has no public API documentation, so **access is BLOCKED**: Daniel needs to ask Prism.fm for API access and terms.
 - Airtable is demoted from "the planning source" to an optional fallback, and manual targets (D12) stay until Prism.fm access exists.
 
+## D15 — Buyers pay every fee; the house keeps face value, facility fee and rebate (2026-10-21)
+Daniel confirmed that the ticket buyer typically pays the platform fee, processing fee, tax, facility fee and promoter rebate on top of the ticket price.
+- **Line items:** RevOS itemizes each order as face value + facility fee + promoter rebate + platform fee + processing fee + tax = buyer total. A reconciliation row checks that the itemized lines add up to the buyer total, so any unrecognised fee shows as a difference.
+- **Organizer proceeds ("house keeps"):** face value + facility fees + promoter rebates, net of refunds. Platform fee, processing fee and tax pass through to the platform, the payment processor and the tax authority. This is buyer total − platform − processing − tax, the same formula as before, now justified by documented fee ownership. Live Eventbrite connections created by `setup:live` therefore use `proceeds_policy = gross_minus_fees_and_tax`. `probe:eventbrite` reports whether real orders match the "buyer pays all" shape.
+- **Source of facility fees and rebates:** organizer-defined fees, read from the source's itemized fee list and matched by name (facility / venue fee → facility fee, rebate → promoter rebate). If the source does not itemize fees, both lines are unavailable, never zero.
+- **Open point:** if an organization is a promoter that does not keep the facility fee (it goes to a third-party venue), proceeds would include money the organization does not keep. Revisit with a per-organization setting once Prism.fm deal data shows who keeps what.
+
 ## Proposed (not done)
 - A `financial_adjustments` table, deferred until a source exposes explicit refund/adjustment amounts. In M1, refunds come from order/line state.

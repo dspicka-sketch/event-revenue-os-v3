@@ -27,6 +27,10 @@ export interface MoneyComponents {
   providerFeeMinor: MinorUnits | null;
   /** Payment processing fee. */
   paymentFeeMinor: MinorUnits | null;
+  /** Venue facility fee paid by the buyer. null when the source does not itemize fees. */
+  facilityFeeMinor: MinorUnits | null;
+  /** Promoter rebate (per-ticket charge paid by the buyer, returned to the promoter). null when not itemized. */
+  promoterRebateMinor: MinorUnits | null;
   taxMinor: MinorUnits | null;
 }
 

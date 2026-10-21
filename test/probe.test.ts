@@ -16,7 +16,11 @@ describe("Eventbrite live probe", () => {
     expect(r.orders.total).toBe(141);
     expect(r.orders.statusValues).toMatchObject({ placed: expect.any(Number), refunded: 1, unpaid: expect.any(Number) });
     expect(r.orders.costs.gross).toEqual({ present: 141, nullOrMissing: 0, nonIntegerValue: 0 });
-    expect(r.orders.feeShape.grossEqualsBasePlusFeesPlusTax).toBeGreaterThan(0);
+    expect(r.orders.feeShape).toMatchObject({ organizerAbsorbsPlatformFees: 0, other: 0 });
+    expect(r.orders.feeShape.buyerPaysAllFees).toBeGreaterThan(100);
+    expect(r.orders.feeComponentNames["Facility Fee"]).toMatchObject({ classifiedAs: "facility_fee" });
+    expect(r.orders.feeComponentNames["Promoter Rebate"]).toMatchObject({ classifiedAs: "promoter_rebate" });
+    expect(r.orders.feeComponentNames["eventbrite.service_fee"]!.classifiedAs).toBe("not counted separately");
     expect(r.pagination.keysSeen).toContain("continuation");
     // Fixture order costs are pre-refund for the partially refunded order.
     expect(r.partialRefunds).toMatchObject({ orders: 1, orderGrossEqualsAllTickets: 1 });

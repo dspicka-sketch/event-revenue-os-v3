@@ -2,7 +2,7 @@
 // tests. Contains no real patron data: no names, emails, phones or barcodes.
 // Fixture connections are attached only to fixture organizations.
 
-import type { EbAttendee, EbCosts, EbEvent, EbOrder } from "./normalize.js";
+import type { EbAttendee, EbCosts, EbEvent, EbFeeComponent, EbOrder } from "./normalize.js";
 
 export const FIXTURE_ACCOUNT_ID = "fixture-eb-org-1";
 
@@ -108,18 +108,51 @@ function usd(value: number) {
 }
 
 /** Per-ticket costs. Fees passed to buyer: gross = base + fees + tax. */
+/** Fixture fee setup: the buyer pays every fee and the tax on top of face value (D15). */
+const FACILITY_FEE = 200;
+const PROMOTER_REBATE = 100;
+const TAX_RATE_PER_10K = 875; // 8.75% on face value
+
+function fee(name: string, value: number, recipient: string): EbFeeComponent {
+  return { name, internal_name: name.toLowerCase().replace(/\W+/g, "_"), value, recipient, payer: "attendee" };
+}
+
+/** Per-ticket costs with itemized fees (Eventbrite `fee_components` shape is ASSUMED). */
 function ticketCosts(base: number): EbCosts {
-  if (base === 0) return { base_price: usd(0), eventbrite_fee: usd(0), payment_fee: usd(0), tax: usd(0), gross: usd(0) };
+  if (base === 0) {
+    return { base_price: usd(0), eventbrite_fee: usd(0), payment_fee: usd(0), tax: usd(0), gross: usd(0), fee_components: [] };
+  }
   const ebFee = Math.round(base * 0.037) + 179;
-  const payFee = Math.round((base + ebFee) * 0.029);
-  const tax = 0;
-  return { base_price: usd(base), eventbrite_fee: usd(ebFee), payment_fee: usd(payFee), tax: usd(tax), gross: usd(base + ebFee + payFee + tax) };
+  const tax = Math.round((base * TAX_RATE_PER_10K) / 10_000);
+  const payFee = Math.round((base + FACILITY_FEE + PROMOTER_REBATE + ebFee + tax) * 0.029);
+  return {
+    base_price: usd(base),
+    eventbrite_fee: usd(ebFee),
+    payment_fee: usd(payFee),
+    tax: usd(tax),
+    gross: usd(base + FACILITY_FEE + PROMOTER_REBATE + ebFee + payFee + tax),
+    fee_components: [
+      fee("Facility Fee", FACILITY_FEE, "organizer"),
+      fee("Promoter Rebate", PROMOTER_REBATE, "organizer"),
+      fee("eventbrite.service_fee", ebFee, "eventbrite"),
+      fee("eventbrite.payment_fee", payFee, "eventbrite"),
+    ],
+  };
 }
 
 function sumCosts(list: EbCosts[]): EbCosts {
   const k = ["base_price", "eventbrite_fee", "payment_fee", "tax", "gross"] as const;
   const out: EbCosts = {};
   for (const key of k) out[key] = usd(list.reduce((a, c) => a + (c[key]?.value ?? 0), 0));
+  // Order-level itemized fees: one component per fee name, summed across tickets.
+  const byName = new Map<string, EbFeeComponent>();
+  for (const c of list) {
+    for (const f of c.fee_components ?? []) {
+      const prev = byName.get(f.name!);
+      byName.set(f.name!, prev ? { ...prev, value: (prev.value as number) + (f.value as number) } : { ...f });
+    }
+  }
+  out.fee_components = [...byName.values()];
   return out;
 }
 

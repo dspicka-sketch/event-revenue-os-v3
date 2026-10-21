@@ -245,19 +245,20 @@ export async function persistSnapshot(
     const r = await client.query<{ inserted: boolean }>(
       `INSERT INTO orders (organization_id, connection_id, provider, provider_account_id, source_id, source_event_id, canonical_event_id,
          source_status, status, currency, currency_scale, gross_minor, base_price_minor, provider_fee_minor, payment_fee_minor, tax_minor,
-         transaction_at, source_updated_at, first_seen_sync_id, last_seen_sync_id, missing_from_source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$19,false)
+         transaction_at, source_updated_at, first_seen_sync_id, last_seen_sync_id, missing_from_source, facility_fee_minor, promoter_rebate_minor)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$19,false,$20,$21)
        ON CONFLICT (organization_id, provider, provider_account_id, source_id) DO UPDATE SET
          source_event_id = EXCLUDED.source_event_id, canonical_event_id = EXCLUDED.canonical_event_id,
          source_status = EXCLUDED.source_status, status = EXCLUDED.status, currency = EXCLUDED.currency,
          currency_scale = EXCLUDED.currency_scale, gross_minor = EXCLUDED.gross_minor, base_price_minor = EXCLUDED.base_price_minor,
          provider_fee_minor = EXCLUDED.provider_fee_minor, payment_fee_minor = EXCLUDED.payment_fee_minor, tax_minor = EXCLUDED.tax_minor,
          transaction_at = EXCLUDED.transaction_at, source_updated_at = EXCLUDED.source_updated_at, ingested_at = now(),
-         last_seen_sync_id = EXCLUDED.last_seen_sync_id, missing_from_source = false
+         last_seen_sync_id = EXCLUDED.last_seen_sync_id, missing_from_source = false,
+         facility_fee_minor = EXCLUDED.facility_fee_minor, promoter_rebate_minor = EXCLUDED.promoter_rebate_minor
        RETURNING (xmax = 0) AS inserted`,
       [orgId, c.id, c.provider, c.provider_account_id, o.sourceId, o.sourceEventId, m.canonical_event_id, o.sourceStatus, o.status,
         o.currency, currencyScale(o.currency), o.grossMinor, o.basePriceMinor, o.providerFeeMinor, o.paymentFeeMinor, o.taxMinor,
-        o.createdAt, o.sourceUpdatedAt, runId],
+        o.createdAt, o.sourceUpdatedAt, runId, o.facilityFeeMinor, o.promoterRebateMinor],
     );
     if (r.rows[0]!.inserted) inserted++;
     else updated++;
@@ -266,8 +267,8 @@ export async function persistSnapshot(
     await client.query(
       `INSERT INTO order_lines (organization_id, connection_id, provider, provider_account_id, source_id, order_source_id, source_event_id,
          canonical_event_id, ticket_class_source_id, ticket_class_name, source_status, status, quantity, currency, gross_minor,
-         base_price_minor, provider_fee_minor, payment_fee_minor, tax_minor, source_updated_at, last_seen_sync_id, missing_from_source, tracking_code)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false,$22)
+         base_price_minor, provider_fee_minor, payment_fee_minor, tax_minor, source_updated_at, last_seen_sync_id, missing_from_source, tracking_code, facility_fee_minor, promoter_rebate_minor)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false,$22,$23,$24)
        ON CONFLICT (organization_id, provider, provider_account_id, source_id) DO UPDATE SET
          order_source_id = EXCLUDED.order_source_id, source_event_id = EXCLUDED.source_event_id, canonical_event_id = EXCLUDED.canonical_event_id,
          ticket_class_source_id = EXCLUDED.ticket_class_source_id, ticket_class_name = EXCLUDED.ticket_class_name,
@@ -275,10 +276,11 @@ export async function persistSnapshot(
          gross_minor = EXCLUDED.gross_minor, base_price_minor = EXCLUDED.base_price_minor, provider_fee_minor = EXCLUDED.provider_fee_minor,
          payment_fee_minor = EXCLUDED.payment_fee_minor, tax_minor = EXCLUDED.tax_minor, source_updated_at = EXCLUDED.source_updated_at,
          ingested_at = now(), last_seen_sync_id = EXCLUDED.last_seen_sync_id, missing_from_source = false,
-         tracking_code = EXCLUDED.tracking_code`,
+         tracking_code = EXCLUDED.tracking_code, facility_fee_minor = EXCLUDED.facility_fee_minor,
+         promoter_rebate_minor = EXCLUDED.promoter_rebate_minor`,
       [orgId, c.id, c.provider, c.provider_account_id, l.sourceId, l.orderSourceId, l.sourceEventId, m.canonical_event_id,
         l.ticketClassSourceId, l.ticketClassName, l.sourceStatus, l.status, l.quantity, l.currency, l.grossMinor, l.basePriceMinor,
-        l.providerFeeMinor, l.paymentFeeMinor, l.taxMinor, l.sourceUpdatedAt, runId, l.trackingCode],
+        l.providerFeeMinor, l.paymentFeeMinor, l.taxMinor, l.sourceUpdatedAt, runId, l.trackingCode, l.facilityFeeMinor, l.promoterRebateMinor],
     );
   }
   const missing = await client.query(
@@ -298,12 +300,14 @@ interface OrderDbRow {
   source_id: string; source_event_id: string; source_status: string; status: NormalizedOrder["status"]; currency: string;
   gross_minor: number | null; base_price_minor: number | null; provider_fee_minor: number | null; payment_fee_minor: number | null;
   tax_minor: number | null; transaction_at: Date | null; source_updated_at: Date | null;
+  facility_fee_minor: number | null; promoter_rebate_minor: number | null;
 }
 interface LineDbRow {
   source_id: string; order_source_id: string; source_event_id: string; ticket_class_source_id: string | null; ticket_class_name: string | null;
   source_status: string; status: NormalizedLine["status"]; quantity: number; currency: string; gross_minor: number | null;
   base_price_minor: number | null; provider_fee_minor: number | null; payment_fee_minor: number | null; tax_minor: number | null;
   source_updated_at: Date | null; tracking_code: string | null;
+  facility_fee_minor: number | null; promoter_rebate_minor: number | null;
 }
 
 /** Load the stored (non-missing) records for an event, as normalized records. */
@@ -315,6 +319,7 @@ export async function loadEventRecords(db: Queryable, orgId: string, eventId: st
       sourceId: r.source_id, sourceEventId: r.source_event_id, sourceStatus: r.source_status, status: r.status, currency: r.currency.trim(),
       grossMinor: r.gross_minor, basePriceMinor: r.base_price_minor, providerFeeMinor: r.provider_fee_minor, paymentFeeMinor: r.payment_fee_minor,
       taxMinor: r.tax_minor, createdAt: r.transaction_at?.toISOString() ?? null, sourceUpdatedAt: r.source_updated_at?.toISOString() ?? null,
+      facilityFeeMinor: r.facility_fee_minor, promoterRebateMinor: r.promoter_rebate_minor,
     }),
   );
   const lines = (
@@ -325,6 +330,7 @@ export async function loadEventRecords(db: Queryable, orgId: string, eventId: st
       ticketClassName: r.ticket_class_name, sourceStatus: r.source_status, status: r.status, quantity: r.quantity, currency: r.currency.trim(),
       grossMinor: r.gross_minor, basePriceMinor: r.base_price_minor, providerFeeMinor: r.provider_fee_minor, paymentFeeMinor: r.payment_fee_minor,
       taxMinor: r.tax_minor, sourceUpdatedAt: r.source_updated_at?.toISOString() ?? null, trackingCode: r.tracking_code,
+      facilityFeeMinor: r.facility_fee_minor, promoterRebateMinor: r.promoter_rebate_minor,
     }),
   );
   const missing = (

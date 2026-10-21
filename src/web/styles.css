@@ -204,3 +204,4 @@ tr.unattributed th, tr.unattributed td { color: var(--muted); }
   .working-list li .share { grid-column: 2 / 4; }
   .working-stat { align-items: flex-start; text-align: left; }
 }
+tr.group-row th { background: var(--bg); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }

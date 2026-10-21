@@ -12,7 +12,21 @@ export interface EbMoney {
   display?: string;
 }
 
+/**
+ * One itemized fee on an order or ticket (Eventbrite `fee_components`, ASSUMED
+ * shape). `value` may be integer minor units or a money object.
+ */
+export interface EbFeeComponent {
+  name?: string | null;
+  internal_name?: string | null;
+  group_name?: string | null;
+  value?: number | EbMoney | null;
+  recipient?: string | null;
+  payer?: string | null;
+}
+
 export interface EbCosts {
+  fee_components?: EbFeeComponent[] | null;
   base_price?: EbMoney | null;
   eventbrite_fee?: EbMoney | null;
   gross?: EbMoney | null;
@@ -103,6 +117,36 @@ function money(m: EbMoney | null | undefined, field: string, currency: string): 
   return assertMinor(m.value, field);
 }
 
+export type FeeKind = "facility_fee" | "promoter_rebate";
+
+/** Recognise organizer-defined fees by name. Names come from the venue's own fee setup. */
+export function classifyFeeComponent(f: EbFeeComponent): FeeKind | null {
+  const n = `${f.name ?? ""} ${f.internal_name ?? ""} ${f.group_name ?? ""}`.toLowerCase();
+  if (/facility|facilities|venue[ _-]?fee|\bfmf\b/.test(n)) return "facility_fee";
+  if (/rebate/.test(n)) return "promoter_rebate";
+  return null;
+}
+
+/**
+ * Sum itemized facility fees and promoter rebates. When the source itemizes
+ * fees but none matches, the amount is a known 0; when it does not itemize at
+ * all, the amount is unknown (null).
+ */
+function itemizedFees(c: EbCosts, currency: string, ctx: string): { facility: number | null; rebate: number | null } {
+  if (!Array.isArray(c.fee_components)) return { facility: null, rebate: null };
+  let facility: number | null = 0;
+  let rebate: number | null = 0;
+  for (const f of c.fee_components) {
+    const kind = classifyFeeComponent(f);
+    if (!kind) continue;
+    // A recognised fee without an amount makes that line unknown, not zero.
+    const v = typeof f.value === "number" ? assertMinor(f.value, `${ctx}.fee_components.${kind}`) : money(f.value ?? null, `${ctx}.fee_components.${kind}`, currency);
+    if (kind === "facility_fee") facility = facility === null || v === null ? null : facility + v;
+    else rebate = rebate === null || v === null ? null : rebate + v;
+  }
+  return { facility, rebate };
+}
+
 function components(costs: EbCosts | null | undefined, fallbackCurrency: string | null, ctx: string): MoneyComponents {
   const c = costs ?? {};
   const currency = (c.gross?.currency ?? c.base_price?.currency ?? fallbackCurrency ?? "").toUpperCase();
@@ -114,6 +158,7 @@ function components(costs: EbCosts | null | undefined, fallbackCurrency: string 
     providerFeeMinor: money(c.eventbrite_fee, `${ctx}.eventbrite_fee`, currency),
     paymentFeeMinor: money(c.payment_fee, `${ctx}.payment_fee`, currency),
     taxMinor: money(c.tax, `${ctx}.tax`, currency),
+    ...(({ facility, rebate }) => ({ facilityFeeMinor: facility, promoterRebateMinor: rebate }))(itemizedFees(c, currency, ctx)),
   };
 }
 

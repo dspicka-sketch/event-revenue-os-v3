@@ -4,7 +4,7 @@
 // names, emails, barcodes or per-buyer amounts.
 
 import { EventbriteClient, type Pagination } from "./client.js";
-import type { EbAttendee, EbCosts, EbMoney, EbOrder } from "./normalize.js";
+import { classifyFeeComponent, type EbAttendee, type EbCosts, type EbMoney, type EbOrder } from "./normalize.js";
 
 const COST_KEYS = ["gross", "base_price", "eventbrite_fee", "payment_fee", "tax"] as const;
 
@@ -34,8 +34,11 @@ export interface ProbeReport {
     hasCreated: number;
     hasChanged: number;
     topLevelKeys: string[];
-    /** gross vs components, for orders with all components present. */
-    feeShape: { grossEqualsBasePlusFeesPlusTax: number; grossEqualsBasePlusTax: number; other: number };
+    /** gross vs components (itemized facility fees and rebates included), for orders with all components present. */
+    feeShape: { buyerPaysAllFees: number; organizerAbsorbsPlatformFees: number; other: number };
+    /** Itemized fee names as the venue set them up, with how RevOS classifies each. */
+    feeComponentNames: Record<string, { orders: number; classifiedAs: string }>;
+    ordersWithItemizedFees: number;
   };
   attendees: {
     totalDefaultListing: number;
@@ -92,7 +95,9 @@ export async function probeEventbrite(client: EventbriteClient, cfg: { organizat
   const currencies: Counts = {};
   const costs = Object.fromEntries(COST_KEYS.map((k) => [k, { present: 0, nullOrMissing: 0, nonIntegerValue: 0 }])) as ProbeReport["orders"]["costs"];
   const moneyKeys: object[] = [];
-  const feeShape = { grossEqualsBasePlusFeesPlusTax: 0, grossEqualsBasePlusTax: 0, other: 0 };
+  const feeShape = { buyerPaysAllFees: 0, organizerAbsorbsPlatformFees: 0, other: 0 };
+  const feeComponentNames: ProbeReport["orders"]["feeComponentNames"] = {};
+  let ordersWithItemizedFees = 0;
   let hasCreated = 0;
   let hasChanged = 0;
   for (const o of orders) {
@@ -110,10 +115,24 @@ export async function probeEventbrite(client: EventbriteClient, cfg: { organizat
         bump(currencies, String(m.currency ?? "(missing)"));
       }
     }
+    // Organizer-defined fees (facility fee, rebate) from the itemized list; names are the venue's own labels.
+    let orgFees = 0;
+    if (Array.isArray(c.fee_components)) {
+      ordersWithItemizedFees++;
+      for (const fc of c.fee_components) {
+        const name = String(fc.name ?? fc.internal_name ?? "(unnamed)").slice(0, 80);
+        const kind = classifyFeeComponent(fc);
+        const e = feeComponentNames[name] ?? { orders: 0, classifiedAs: kind ?? "not counted separately" };
+        e.orders++;
+        feeComponentNames[name] = e;
+        const v = typeof fc.value === "number" ? fc.value : val(fc.value as EbMoney | null);
+        if (kind && v !== null) orgFees += v;
+      }
+    }
     const [g, b, f, p, t] = [val(c.gross), val(c.base_price), val(c.eventbrite_fee), val(c.payment_fee), val(c.tax)];
     if (g !== null && b !== null && f !== null && p !== null && t !== null && !(g === 0 && b === 0)) {
-      if (g === b + f + p + t) feeShape.grossEqualsBasePlusFeesPlusTax++;
-      else if (g === b + t) feeShape.grossEqualsBasePlusTax++;
+      if (g === b + orgFees + f + p + t) feeShape.buyerPaysAllFees++;
+      else if (g === b + orgFees + t) feeShape.organizerAbsorbsPlatformFees++;
       else feeShape.other++;
     }
   }
@@ -178,8 +197,13 @@ export async function probeEventbrite(client: EventbriteClient, cfg: { organizat
           : "Partial refunds present but order/ticket totals match neither pattern → investigate manually.",
     );
   } else findings.push("No partially refunded orders in this event; partial-refund behavior remains unverified.");
-  if (feeShape.grossEqualsBasePlusFeesPlusTax || feeShape.grossEqualsBasePlusTax) {
-    findings.push(`Fee shape: ${feeShape.grossEqualsBasePlusFeesPlusTax} orders look like fees passed to buyer, ${feeShape.grossEqualsBasePlusTax} look absorbed by organizer, ${feeShape.other} neither. Evidence only — confirm against the event's fee settings before enabling proceeds.`);
+  if (feeShape.buyerPaysAllFees || feeShape.organizerAbsorbsPlatformFees || feeShape.other) {
+    findings.push(`Fee shape: ${feeShape.buyerPaysAllFees} orders consistent with the buyer paying every fee (D15), ${feeShape.organizerAbsorbsPlatformFees} look like the organizer absorbed platform/processing fees, ${feeShape.other} match neither.${feeShape.other ? " Check fee names below for unrecognised fees." : ""}`);
+  }
+  if (orders.length && ordersWithItemizedFees === 0) {
+    findings.push("Orders carry no itemized fee list (fee_components): facility fees and promoter rebates will show as 'not reported by source'.");
+  } else if (Object.keys(feeComponentNames).length) {
+    findings.push(`Itemized fees: ${Object.entries(feeComponentNames).map(([n, v]) => `"${n}" → ${v.classifiedAs}`).join("; ")}. If a facility fee or rebate is not recognised, tell the developer its exact name.`);
   }
   if (orders.length && !hasCreated) findings.push("BLOCKER: orders have no 'created' time; sales-date views cannot work.");
 
@@ -206,6 +230,8 @@ export async function probeEventbrite(client: EventbriteClient, cfg: { organizat
       hasChanged,
       topLevelKeys: keysOf(orders),
       feeShape,
+      feeComponentNames,
+      ordersWithItemizedFees,
     },
     attendees: {
       totalDefaultListing: attendees.length,
@@ -250,6 +276,8 @@ Keys seen: ${r.pagination.keysSeen.join(", ") || "(none)"} · continuation used:
 | money object keys | ${r.orders.moneyObjectKeys.join(", ")} |
 | has created / changed | ${r.orders.hasCreated} / ${r.orders.hasChanged} |
 | fee shape | ${JSON.stringify(r.orders.feeShape)} |
+| orders with itemized fees | ${r.orders.ordersWithItemizedFees} |
+| itemized fee names | ${JSON.stringify(r.orders.feeComponentNames)} |
 | top-level keys | ${r.orders.topLevelKeys.join(", ")} |
 
 | Cost field | present | null/missing | non-integer value |
