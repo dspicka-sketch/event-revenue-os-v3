@@ -51,6 +51,8 @@ export interface NormalizedLine extends MoneyComponents {
   status: LineStatus;
   quantity: number;
   sourceUpdatedAt: string | null;
+  /** Marketing tracking-link code the purchase came through (e.g. Eventbrite `aff`), if any. */
+  trackingCode: string | null;
 }
 
 export interface NormalizedEvent {

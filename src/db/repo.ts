@@ -257,18 +257,19 @@ export async function persistSnapshot(
     await client.query(
       `INSERT INTO order_lines (organization_id, connection_id, provider, provider_account_id, source_id, order_source_id, source_event_id,
          canonical_event_id, ticket_class_source_id, ticket_class_name, source_status, status, quantity, currency, gross_minor,
-         base_price_minor, provider_fee_minor, payment_fee_minor, tax_minor, source_updated_at, last_seen_sync_id, missing_from_source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false)
+         base_price_minor, provider_fee_minor, payment_fee_minor, tax_minor, source_updated_at, last_seen_sync_id, missing_from_source, tracking_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false,$22)
        ON CONFLICT (organization_id, provider, provider_account_id, source_id) DO UPDATE SET
          order_source_id = EXCLUDED.order_source_id, source_event_id = EXCLUDED.source_event_id, canonical_event_id = EXCLUDED.canonical_event_id,
          ticket_class_source_id = EXCLUDED.ticket_class_source_id, ticket_class_name = EXCLUDED.ticket_class_name,
          source_status = EXCLUDED.source_status, status = EXCLUDED.status, quantity = EXCLUDED.quantity, currency = EXCLUDED.currency,
          gross_minor = EXCLUDED.gross_minor, base_price_minor = EXCLUDED.base_price_minor, provider_fee_minor = EXCLUDED.provider_fee_minor,
          payment_fee_minor = EXCLUDED.payment_fee_minor, tax_minor = EXCLUDED.tax_minor, source_updated_at = EXCLUDED.source_updated_at,
-         ingested_at = now(), last_seen_sync_id = EXCLUDED.last_seen_sync_id, missing_from_source = false`,
+         ingested_at = now(), last_seen_sync_id = EXCLUDED.last_seen_sync_id, missing_from_source = false,
+         tracking_code = EXCLUDED.tracking_code`,
       [orgId, c.id, c.provider, c.provider_account_id, l.sourceId, l.orderSourceId, l.sourceEventId, m.canonical_event_id,
         l.ticketClassSourceId, l.ticketClassName, l.sourceStatus, l.status, l.quantity, l.currency, l.grossMinor, l.basePriceMinor,
-        l.providerFeeMinor, l.paymentFeeMinor, l.taxMinor, l.sourceUpdatedAt, runId],
+        l.providerFeeMinor, l.paymentFeeMinor, l.taxMinor, l.sourceUpdatedAt, runId, l.trackingCode],
     );
   }
   const missing = await client.query(
@@ -293,7 +294,7 @@ interface LineDbRow {
   source_id: string; order_source_id: string; source_event_id: string; ticket_class_source_id: string | null; ticket_class_name: string | null;
   source_status: string; status: NormalizedLine["status"]; quantity: number; currency: string; gross_minor: number | null;
   base_price_minor: number | null; provider_fee_minor: number | null; payment_fee_minor: number | null; tax_minor: number | null;
-  source_updated_at: Date | null;
+  source_updated_at: Date | null; tracking_code: string | null;
 }
 
 /** Load the stored (non-missing) records for an event, as normalized records. */
@@ -314,7 +315,7 @@ export async function loadEventRecords(db: Queryable, orgId: string, eventId: st
       sourceId: r.source_id, orderSourceId: r.order_source_id, sourceEventId: r.source_event_id, ticketClassSourceId: r.ticket_class_source_id,
       ticketClassName: r.ticket_class_name, sourceStatus: r.source_status, status: r.status, quantity: r.quantity, currency: r.currency.trim(),
       grossMinor: r.gross_minor, basePriceMinor: r.base_price_minor, providerFeeMinor: r.provider_fee_minor, paymentFeeMinor: r.payment_fee_minor,
-      taxMinor: r.tax_minor, sourceUpdatedAt: r.source_updated_at?.toISOString() ?? null,
+      taxMinor: r.tax_minor, sourceUpdatedAt: r.source_updated_at?.toISOString() ?? null, trackingCode: r.tracking_code,
     }),
   );
   const missing = (

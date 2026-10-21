@@ -149,8 +149,41 @@ export function pilotFixture(revision = 0): FixtureEventData[] {
   ];
 }
 
+/**
+ * Synthetic email campaigns. Their Eventbrite links carry these tracking codes
+ * (`?aff=`); the Mailchimp fixture reports the same campaigns.
+ */
+export const FIXTURE_CAMPAIGNS = [
+  { code: "mc-announce", title: "On sale now: The Night Owls", sendTime: "2026-09-02T17:00:00Z" },
+  { code: "mc-lineup", title: "Support acts announced", sendTime: "2026-09-22T17:00:00Z" },
+  { code: "mc-lastcall", title: "Last call: limited tickets left", sendTime: "2026-10-13T17:00:00Z" },
+] as const;
+
+/** Non-email tracking links used in the fixture (an Instagram bio link, paid social, the venue site). */
+const FIXTURE_LINKS = [
+  { code: "ig-bio", weight: 0.14 },
+  { code: "fb-ads", weight: 0.12 },
+  { code: "venue-site", weight: 0.07 },
+];
+
+function fixtureTrackingCode(created: string, rc: () => number): string | null {
+  const t = Date.parse(created);
+  const live = FIXTURE_CAMPAIGNS.find((c) => t >= Date.parse(c.sendTime) && t < Date.parse(c.sendTime) + 7 * 86400_000);
+  if (live && rc() < 0.5) return live.code;
+  let x = rc();
+  for (const l of FIXTURE_LINKS) {
+    if (x < l.weight) return l.code;
+    x -= l.weight;
+  }
+  // A few purchases through an old email's link after its 7-day window.
+  if (x < 0.03) return "mc-announce";
+  return null;
+}
+
 function buildPerformance(eventId: string, startUtc: string, seed: number, orderCount: number, revision: number): FixtureEventData {
   const r = rng(seed);
+  // Separate stream so adding tracking codes leaves every other fixture value unchanged.
+  const rc = rng(seed + 1000);
   const event: EbEvent = {
     id: eventId,
     name: { text: "[FIXTURE] The Night Owls — Live" },
@@ -172,6 +205,7 @@ function buildPerformance(eventId: string, startUtc: string, seed: number, order
     const qty = 1 + Math.floor(r() * 4);
     const cls = CLASSES[Math.floor(r() * CLASSES.length)]!;
     const comp = i % 47 === 5;
+    const affiliate = fixtureTrackingCode(created, rc);
     let status = "placed";
     if (i % 61 === 7) status = "unpaid";
     const lines: EbAttendee[] = [];
@@ -188,6 +222,7 @@ function buildPerformance(eventId: string, startUtc: string, seed: number, order
         cancelled: false,
         changed: created,
         costs: ticketCosts(comp ? 0 : cls.price),
+        affiliate,
       });
     }
     let changed = created;

@@ -1,5 +1,7 @@
 # RevOS: instructions for Claude Code
 
+**Product lead:** RevOS's reason to exist is showing **which marketing is working**, across every channel and tool, for every show (DECISIONS D13). Deal terms and settlements come from Prism.fm, never from RevOS's own model (D14).
+
 RevOS is a connective revenue layer for live-event businesses. It links the systems a venue or promoter already uses (ticketing, email, website, SMS, planning, resale), normalizes their records, and shows trustworthy revenue. It is **not** a ticketing platform, CRM, booking system or marketing sender. Product owner: Daniel Spicka.
 
 ## Products (one backend)
@@ -42,7 +44,7 @@ docs/           STATUS.md, ROADMAP.md, DECISIONS.md, integrations.md
 - **Integrations:** read-only. No campaigns, inventory changes or external writes. Check the vendor's current official docs before writing an adapter and record evidence levels in `docs/integrations.md`. Never invent an endpoint, and never count a fixture test as live verification.
 - **Secrets and privacy:** secrets live in the server environment or a secret manager. The DB stores only the secret's *name*. Nothing secret goes in Git, logs, client bundles or chat. Don't copy patron names, emails, phones or barcodes. Clients never call vendor APIs.
 - **Access:** every tenant route checks organization membership. Non-members get 404. Admin-only actions are setting targets and testing connections.
-- **Attribution (later):** at most one primary attribution per order, using a supported order linkage. Do not sum vendors' proprietary attributed-revenue figures.
+- **Attribution:** at most one primary attribution per order, using a supported order linkage. Today that is the Eventbrite tracking-link code within 7 days of a campaign send. Unlinked orders stay unattributed and are shown. Never sum vendors' proprietary attributed-revenue figures. Opens, list membership or timing alone never count as attribution.
 
 ## Working rules
 

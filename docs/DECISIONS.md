@@ -52,5 +52,17 @@ Inspected first: the stack is TypeScript end to end, revenue rules are pure modu
 ## D12 — Targets are manual plan values until M5
 `event_targets` stores per-show targets for paid tickets, gross after refunds or organizer proceeds, with `source = 'manual'`. They are compared against actuals and never added to them. A proceeds target is not judged while proceeds are unavailable. "Behind target" is a simple run-rate comparison: the last 7 days' average against what is needed per remaining day. It is labeled as not a forecast. Airtable (M5) becomes the source where it has the value.
 
+## D13 — Product lead: "which marketing is working" (2026-10-21)
+Daniel reviewed the first build and found that with only Eventbrite connected it mirrors Eventbrite's own organizer app. He chose **marketing effectiveness** as RevOS's lead differentiator, ahead of break-even and plan vs actual.
+- **Linkage:** Eventbrite tracking-link codes (`?aff=CODE`), which Eventbrite stores against the purchase and reports on attendee records (field `affiliate`, SECONDHAND until the probe confirms it). This is an order-level, PII-free linkage, so it meets the brief's "actual supported order linkage" rule. It covers every channel (email, social, ads, partners), not only Mailchimp.
+- **Rule:** one primary attribution per order: the order's tracking code. A code mapped to a campaign counts only if the order falls within 7 days after that campaign's send time. Orders outside the window or with conflicting codes are reported, not attributed. Orders with no code stay **unattributed** and are shown as such. Refunds reduce attributed revenue the same way they reduce sales.
+- **Mailchimp adds** sends, opens and clicks per campaign, and maps campaigns to codes automatically by reading the `aff` parameter in each campaign's Eventbrite link URLs. Its own "attributed revenue" (e-commerce) figures are never used or summed.
+- **Not claimed:** opens, membership and timing correlation are not attribution. Nothing claims incremental lift.
+
+## D14 — Deal terms, budgets and settlements come from Prism.fm (2026-10-21)
+RevOS will not model guarantees, door splits or "versus" deals itself. Those live in Prism.fm and will be read from it.
+- Prism.fm has no public API documentation, so **access is BLOCKED**: Daniel needs to ask Prism.fm for API access and terms.
+- Airtable is demoted from "the planning source" to an optional fallback, and manual targets (D12) stay until Prism.fm access exists.
+
 ## Proposed (not done)
 - A `financial_adjustments` table, deferred until a source exposes explicit refund/adjustment amounts. In M1, refunds come from order/line state.

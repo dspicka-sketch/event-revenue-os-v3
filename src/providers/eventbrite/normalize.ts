@@ -52,6 +52,8 @@ export interface EbAttendee {
   cancelled?: boolean | null;
   changed?: string | null;
   costs?: EbCosts | null;
+  /** Tracking-link (`aff`) code the ticket was bought through (SECONDHAND field name). */
+  affiliate?: string | null;
 }
 
 /** Eventbrite order statuses (see docs/integrations.md; UNVERIFIED list). */
@@ -146,6 +148,13 @@ export function normalizeOrder(o: EbOrder, eventCurrency: string | null): Normal
   };
 }
 
+/** Keep tracking codes to a safe, bounded token; anything else is treated as absent. */
+export function cleanTrackingCode(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return /^[A-Za-z0-9._~-]{1,100}$/.test(t) ? t : null;
+}
+
 export function normalizeAttendee(a: EbAttendee, eventCurrency: string | null): NormalizedLine {
   const q = a.quantity ?? 1;
   if (!Number.isSafeInteger(q) || q < 0) throw new ProviderError("bad_response", `attendee ${a.id}: invalid quantity.`);
@@ -159,6 +168,7 @@ export function normalizeAttendee(a: EbAttendee, eventCurrency: string | null): 
     status: mapAttendeeStatus(a),
     quantity: q,
     sourceUpdatedAt: iso(a.changed),
+    trackingCode: cleanTrackingCode(a.affiliate),
     ...components(a.costs, eventCurrency, `attendee ${a.id}`),
   };
 }
