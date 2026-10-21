@@ -13,6 +13,7 @@ A fixture test passing is not live verification.
   - Eventbrite's own (archived) Python SDK, `github.com/eventbrite/eventbrite-sdk-python`: `eventbrite/access_methods.py`, `client.py`, `utils.py`.
   - Web search results summarizing the API, from third parties (Fivetran, Alloy, Educative, Workato) and Eventbrite's API Terms of Use.
 - **Before the first live run**, re-check every ASSUMED/SECONDHAND row below against the official reference.
+- **`npm run probe:eventbrite`** (`src/providers/eventbrite/probe.ts`) answers most ASSUMED rows from real payloads: status values; `status` filter counts for orders and attendees; money object keys and integer check; cost fields present; fee shape (gross = base + fees + tax vs base + tax); whether order costs are pre- or post-refund on partially refunded orders; and whether the default attendee listing hides not-attending tickets. Update the rows below from its report and record the date.
 
 ### Authentication
 

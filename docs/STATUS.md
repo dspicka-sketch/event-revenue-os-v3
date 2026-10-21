@@ -24,11 +24,18 @@ _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (s
 - Account screen: org list with role and FIXTURE/LIVE labels, sign out.
 - Shared code: `@revos/domain` and `@revos/shared` resolve to `../src`, so no revenue logic is duplicated.
 
+### Hardening (2026-10-21, after the technical report)
+- Only one sync can run per show (enforced by a database unique index). Runs left over from a crash are closed as `abandoned` after 10 minutes. Refresh has a 60-second cooldown per show (HTTP 429 + `Retry-After`).
+- Every response gets security headers: a strict CSP (no inline script or style), nosniff, no-referrer, and a ban on framing. API responses are never cached (`no-store`). Checked in a real browser: no CSP violations across the desktop flow.
+- Orders without a transaction time now raise `missing_transaction_time` instead of silently dropping out of pace figures.
+- `npm run probe:eventbrite`: a read-only, PII-free diagnostic for the first live run (see integrations.md).
+- The desktop "last 7 days" figure now has one definition (venue-local sale days through today), matching mobile.
+
 ## Verification actually performed (2026-10-21)
 
 | Check | Result |
 |---|---|
-| `npm run check` (local PostgreSQL 16) | typecheck OK; **61/61 tests** passed (money 6, revenue 12, pulse 8, Eventbrite client 10, DB sync 11, HTTP API 14); web build OK; secret/PII scan clean (86 files + bundle) |
+| `npm run check` (local PostgreSQL 16) | typecheck OK; **71/71 tests** passed (money 6, revenue 13, pulse 8, Eventbrite client 10, probe 4, DB sync 14, HTTP API 16); web build OK; secret/PII scan clean |
 | Mobile `npm run typecheck` / `npm test` | OK / 6/6 passed |
 | `npx expo export --platform web` and `--platform ios` | Both bundles built (iOS Hermes bytecode, 2.7 MB), including the shared domain modules |
 | Desktop manual run (Playwright, 1280 px and 390 px) | sign-in → shows → show detail (pace tooltip) → integrations (test connection). No horizontal overflow at 390 px after fixing a hidden-header overflow bug |
@@ -50,5 +57,5 @@ Not verified: the app on a physical iPhone or Android phone, or in a simulator. 
 
 ## Next actions for Daniel
 
-1. **Run the live Eventbrite read** on your own machine (README → Live setup), or allow `www.eventbriteapi.com` in this environment's network settings and add the token as an environment secret.
+1. **Run the live Eventbrite read** on your own machine. Start with `npm run probe:eventbrite` and send the developer the `reports/eventbrite-probe-*.md` file it writes (it contains no customer data). Then follow README → Live setup. Alternatively, allow `www.eventbriteapi.com` in this environment's network settings and add the token as an environment secret.
 2. **Try the mobile app** on your phone: `HOST=0.0.0.0 npm start` at the repo root, then `cd mobile && npx expo start` and open it in Expo Go.

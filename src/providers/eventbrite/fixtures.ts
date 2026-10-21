@@ -21,6 +21,20 @@ export interface FixtureTransportOptions {
   failures?: FixtureFailure[];
   /** Optional per-path failure hook (path without base URL). */
   failFor?: (path: string, query: URLSearchParams) => FixtureFailure | undefined;
+  /**
+   * What the attendees listing returns with no status filter. "all" (default)
+   * or "attending" — the latter simulates a source that hides refunded and
+   * cancelled tickets unless asked, so that risk can be tested.
+   */
+  attendeeDefault?: "all" | "attending";
+}
+
+function attendeeMatches(a: EbAttendee, filter: string): boolean {
+  const off = Boolean(a.refunded || a.cancelled) || a.status === "Not Attending";
+  if (filter === "attending") return !off && a.status !== "Unpaid";
+  if (filter === "not_attending") return off;
+  if (filter === "unpaid") return a.status === "Unpaid";
+  return true;
 }
 
 export interface FixtureTransport {
@@ -80,7 +94,8 @@ export function createFixtureTransport(opts: FixtureTransportOptions): FixtureTr
     if (!ev) return respond(404, { error: "NOT_FOUND" });
     if (!m[2]) return respond(200, ev.event);
     if (m[2] === "orders/") return respond(200, page("orders", ev.orders, url.searchParams));
-    return respond(200, page("attendees", ev.attendees, url.searchParams));
+    const filter = url.searchParams.get("status") ?? (opts.attendeeDefault === "attending" ? "attending" : "all");
+    return respond(200, page("attendees", ev.attendees.filter((a) => attendeeMatches(a, filter)), url.searchParams));
   };
   return { fetch: impl as typeof fetch, calls };
 }

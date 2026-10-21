@@ -57,16 +57,17 @@ npm run check:mobile            # mobile typecheck + tests
    - `EVENTBRITE_TOKEN`: the private token
    - `EVENTBRITE_ORGANIZATION_ID`: the Eventbrite organization that owns the event
    - `EVENTBRITE_EVENT_ID`: the pilot performance's event ID (the number in the event URL)
-3. `npm run setup:live -- "Your Venue Name"` registers the organization, the connection and the event. The database stores only the *name* of the secret variable (`EVENTBRITE_TOKEN`), never its value.
-4. Start the server, open the live organization, open the event and press **Refresh**. You can also run `npm run sync -- <orgId> <eventId>`.
-5. **Reconcile against Eventbrite's own report.** In Eventbrite's sales report for the same event, set the filters: all dates, the same currency, completed orders only, and fees shown separately. Copy the figures (in cents) into a JSON file such as:
+3. **Run the probe first:** `npm run probe:eventbrite`. It makes read-only requests and writes `reports/eventbrite-probe-<date>.md`, which settles the open API questions: status values, which money fields exist, whether refunded tickets appear in the default listing, how partial refunds affect order totals, and whether fees look buyer-paid or absorbed. The report holds only counts, field names and Eventbrite's own status words, so it is safe to share with the developer. Any line starting with **BLOCKER** must be fixed before trusting totals.
+4. `npm run setup:live -- "Your Venue Name"` registers the organization, the connection and the event. The database stores only the *name* of the secret variable (`EVENTBRITE_TOKEN`), never its value.
+5. Start the server, open the live organization, open the event and press **Refresh**. You can also run `npm run sync -- <orgId> <eventId>`.
+6. **Reconcile against Eventbrite's own report.** In Eventbrite's sales report for the same event, set the filters: all dates, the same currency, completed orders only, and fees shown separately. Copy the figures (in cents) into a JSON file such as:
    ```json
    { "currency": "USD", "filters": "Sales report, all dates, completed orders, fees separate, exported 2026-10-21",
      "grossSales": 1234500, "refunds": 0, "platformFees": 45600, "paymentFees": 23400, "tax": 0, "paidTickets": 410 }
    ```
    Then run `npm run reconcile:compare -- <orgId> <eventId> report.json`. The result appears in the event's reconciliation table. Any unexplained difference must be investigated before the connection counts as reconciled.
 
-Only after step 5 shows zero unexplained difference should fee ownership be recorded and `proceeds_policy` changed from `unverified`. Until then, organizer proceeds stay **Unavailable** on live data, by design.
+Only after step 6 shows zero unexplained difference should fee ownership be recorded and `proceeds_policy` changed from `unverified`. Until then, organizer proceeds stay **Unavailable** on live data, by design.
 
 ## Accounts and access
 
