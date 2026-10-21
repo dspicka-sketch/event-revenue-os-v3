@@ -216,3 +216,5 @@ tr.group-row th { background: var(--bg); font-size: 0.8rem; text-transform: uppe
 .spend-note { color: var(--text); }
 .rename select { font: inherit; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 .spend-form input { width: 7em; }
+.warn-callout { background: var(--warn-bg); color: var(--warn-fg); margin: 12px 0 0; padding: 8px 12px; }
+.marketing table.data tbody th { min-width: 13em; }

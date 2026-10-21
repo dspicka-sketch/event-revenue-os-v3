@@ -88,7 +88,8 @@ export function WhatsWorkingCard({ all, week }: { all: OrgMarketing; week: OrgMa
   const t = useTheme();
   const [period, setPeriod] = useState<"week" | "all">(week && week.paidTickets > 0 ? "week" : "all");
   const m = period === "week" && week ? week : all;
-  const top = m.drivers.slice(0, 4);
+  const top = m.drivers.filter((d) => d.paidTickets > 0).slice(0, 4);
+  const spentNoSales = m.drivers.filter((d) => d.paidTickets === 0 && d.spend.some((x) => (x.minor ?? 0) > 0));
   const max = Math.max(1, ...top.map((d) => d.paidTickets), m.unattributedTickets);
   return (
     <Card>
@@ -123,6 +124,11 @@ export function WhatsWorkingCard({ all, week }: { all: OrgMarketing; week: OrgMa
         ))
       )}
       <UnattributedRow tickets={m.unattributedTickets} total={m.paidTickets} max={max} />
+      {spentNoSales.length > 0 && (
+        <Text style={{ color: t.warnFg, backgroundColor: t.warnBg, borderRadius: 8, padding: 8, marginTop: 10, fontSize: 12 }}>
+          Spent with no linked sales: {spentNoSales.map((d) => `${d.label} (${moneyList(d.spend)})`).join(", ")}
+        </Text>
+      )}
     </Card>
   );
 }

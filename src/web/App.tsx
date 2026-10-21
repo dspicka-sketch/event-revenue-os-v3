@@ -977,7 +977,8 @@ function ShareBar({ value, max, label, muted }: { value: number; max: number; la
 function WhatsWorking({ all, week }: { all: OrgMarketing; week: OrgMarketing | null }) {
   const [period, setPeriod] = useState<"week" | "all">(week && week.paidTickets > 0 ? "week" : "all");
   const m = period === "week" && week ? week : all;
-  const top = m.drivers.slice(0, 6);
+  const top = m.drivers.filter((d) => d.paidTickets > 0).slice(0, 6);
+  const spentNoSales = m.drivers.filter((d) => d.paidTickets === 0 && d.spend.some((x) => (x.minor ?? 0) > 0));
   const max = Math.max(1, ...top.map((d) => d.paidTickets), m.unattributedTickets);
   return (
     <section className="card working" aria-labelledby="ww-h">
@@ -1018,6 +1019,11 @@ function WhatsWorking({ all, week }: { all: OrgMarketing; week: OrgMarketing | n
             <span className="working-share">{m.paidTickets ? Math.floor((m.unattributedTickets * 100) / m.paidTickets) : 0}%</span>
           </li>
         </ol>
+      )}
+      {spentNoSales.length > 0 && (
+        <p className="callout warn-callout small" role="note">
+          <strong>Spent with no linked sales:</strong> {spentNoSales.map((d) => `${d.label} (${money(d.spend)})`).join(", ")}.
+        </p>
       )}
     </section>
   );
