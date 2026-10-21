@@ -297,7 +297,7 @@ function EventList({ org, go, onAuth }: { org: Organization; go: Go; onAuth: () 
                 <th scope="col" className="num">Gross after refunds</th>
                 <th scope="col" className="num">Organizer proceeds</th>
                 <th scope="col">Target</th>
-                <th scope="col" className="num">Last 7 days</th>
+                <th scope="col" className="num">Last 7 days (sale date)</th>
                 <th scope="col">Attention</th>
                 <th scope="col">Data freshness</th>
               </tr>
@@ -350,7 +350,7 @@ function eventRows(e: EventDto, card: ShowCard | undefined, tz: string, go: Go, 
       <td className="num">{fmtMeasure(c.measures.grossAfterRefunds, c.currency)} <MeasureStatusTag m={c.measures.grossAfterRefunds} /></td>
       <td className="num">{fmtMeasure(c.measures.organizerProceeds, c.currency)} <MeasureStatusTag m={c.measures.organizerProceeds} /></td>
       <td>{i === 0 ? target : ""}</td>
-      <td className="num">{c.last7Days.paidTickets}</td>
+      <td className="num">{i === 0 && card?.pace ? card.pace.last7DaysPaidTickets : ""}</td>
       <td>{i === 0 ? attention : ""}</td>
       <td>{i === 0 ? fresh : ""}</td>
     </tr>
@@ -425,7 +425,7 @@ function EventPage({ org, eventId, go, onAuth }: { org: Organization; eventId: s
       {!e.revenue ? (
         <div className="card"><p>No data has been read for this show yet. Use <strong>Refresh</strong> to run the first read.</p></div>
       ) : (
-        e.revenue.currencies.map((c) => <CurrencySection key={c.currency} c={c} defs={data.definitions} stale={e.freshness.stale} comparison={e.reportComparison} />)
+        e.revenue.currencies.map((c) => <CurrencySection key={c.currency} c={c} defs={data.definitions} stale={e.freshness.stale} comparison={e.reportComparison} last7={c.currency === card.currency ? card.pace?.last7DaysPaidTickets ?? null : null} />)
       )}
 
       {e.revenue && <Exceptions list={e.revenue.exceptions} />}
@@ -529,7 +529,7 @@ function SyncStatus({ e, tz }: { e: EventDto; tz: string }) {
 
 const MEASURE_ORDER = ["grossSales", "refunds", "grossAfterRefunds", "ticketFaceValue", "platformFees", "paymentFees", "tax", "discounts", "organizerProceeds", "cashRemitted"] as const;
 
-function CurrencySection({ c, defs, stale, comparison }: { c: CurrencyRevenue; defs: EventDetailResponse["definitions"]; stale: boolean; comparison: ReconciliationRow[] | null }) {
+function CurrencySection({ c, defs, stale, comparison, last7 }: { c: CurrencyRevenue; defs: EventDetailResponse["definitions"]; stale: boolean; comparison: ReconciliationRow[] | null; last7: number | null }) {
   const reportRows = (comparison ?? []).filter((r) => r.key.startsWith("report_"));
   return (
     <section className="currency" aria-labelledby={`cur-${c.currency}`}>
@@ -541,7 +541,7 @@ function CurrencySection({ c, defs, stale, comparison }: { c: CurrencyRevenue; d
         <Tile label="Refunded tickets" value={String(c.tickets.refunded)} />
         <Tile label="Cancelled tickets" value={String(c.tickets.cancelled)} />
         <Tile label="Unpaid / pending" value={String(c.tickets.unpaid)} hint="Not counted as sales" />
-        <Tile label="Paid tickets, last 7 days" value={String(c.last7Days.paidTickets)} hint="By transaction date" />
+        {last7 !== null && <Tile label="Paid tickets, last 7 days" value={String(last7)} hint="Sale date, venue time, through today" />}
       </div>
 
       <h3>Revenue components</h3>

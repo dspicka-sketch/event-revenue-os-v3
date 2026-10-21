@@ -74,6 +74,11 @@ export interface CurrencyRevenue {
     organizerProceeds: Measure;
     cashRemitted: Measure;
   };
+  /**
+   * Rolling 168 h by transaction time, as of the sync. Kept for API stability;
+   * clients use ShowCard.pace (venue-local sale days through today) instead so
+   * "last 7 days" has one meaning everywhere.
+   */
   last7Days: { paidTickets: number; grossSales: Measure };
   /**
    * Net sales by transaction date in the venue timezone (current state: fully
