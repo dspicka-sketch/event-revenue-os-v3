@@ -4,7 +4,7 @@ import { currencyScale, type Measure } from "../domain/money.js";
 import { TARGET_LABELS, type AttentionItem, type ShowCard, type TargetProgress } from "../domain/pulse.js";
 import {
   api, ApiError, getToken, setToken,
-  type ConnectionsResponse, type EventDetailResponse, type EventDto, type MeResponse, type Organization, type PulseResponse, type TargetMeasure,
+  type ConnectionsResponse, type EventDetailResponse, type MarketingSummary, type EventDto, type MeResponse, type Organization, type PulseResponse, type TargetMeasure,
 } from "./api.js";
 import { fmtDateTime, fmtMeasure, fmtRelative, formatMoney } from "./format.js";
 import { PaceChart } from "./PaceChart.js";
@@ -296,6 +296,7 @@ function EventList({ org, go, onAuth }: { org: Organization; go: Go; onAuth: () 
                 <th scope="col" className="num">Net paid tickets</th>
                 <th scope="col" className="num">Gross after refunds</th>
                 <th scope="col" className="num">Organizer proceeds</th>
+                <th scope="col">Top driver</th>
                 <th scope="col">Target</th>
                 <th scope="col" className="num">Last 7 days (sale date)</th>
                 <th scope="col">Attention</th>
@@ -330,13 +331,17 @@ function eventRows(e: EventDto, card: ShowCard | undefined, tz: string, go: Go, 
   const fresh = <Freshness e={e} />;
   const top = card?.attention.find((a) => a.severity !== "info") ?? card?.attention[0];
   const attention = top ? <span className={`tag sev ${top.severity}`} title={top.detail}><span aria-hidden="true">{SEVERITY_ICON[top.severity]}</span> {top.title}{card!.attention.length > 1 ? ` +${card!.attention.length - 1}` : ""}</span> : <span className="muted small">—</span>;
+  const lead = card?.marketing?.topDrivers[0];
+  const driver = lead
+    ? <span className="driver-cell"><strong>{lead.label}</strong><span className="muted small"> {lead.ticketShare}% of tickets · {card!.marketing!.trackedShare}% tracked</span></span>
+    : <span className="muted small">{card?.marketing ? "No tracked sales" : "—"}</span>;
   const target = card?.targets[0] ? <span className={`tag t-${card.targets[0].status}`}>{card.targets[0].percent ?? "?"}% · {TARGET_STATUS[card.targets[0].status]}</span> : <span className="muted small">None</span>;
   if (currencies.length === 0) {
     return [
       <tr key={e.id}>
         <th scope="row">{link}</th>
         <td>{fmtDateTime(e.performanceStartUtc, tz)}</td>
-        <td colSpan={5} className="muted">No data yet — open the show and use Refresh.</td>
+        <td colSpan={6} className="muted">No data yet — open the show and use Refresh.</td>
         <td>{attention}</td>
         <td>{fresh}</td>
       </tr>,
@@ -349,6 +354,7 @@ function eventRows(e: EventDto, card: ShowCard | undefined, tz: string, go: Go, 
       <td className="num">{c.tickets.paid}{c.tickets.partial ? "+" : ""}</td>
       <td className="num">{fmtMeasure(c.measures.grossAfterRefunds, c.currency)} <MeasureStatusTag m={c.measures.grossAfterRefunds} /></td>
       <td className="num">{fmtMeasure(c.measures.organizerProceeds, c.currency)} <MeasureStatusTag m={c.measures.organizerProceeds} /></td>
+      <td>{i === 0 ? driver : ""}</td>
       <td>{i === 0 ? target : ""}</td>
       <td className="num">{i === 0 && card?.pace ? card.pace.last7DaysPaidTickets : ""}</td>
       <td>{i === 0 ? attention : ""}</td>
@@ -409,6 +415,11 @@ function EventPage({ org, eventId, go, onAuth }: { org: Organization; eventId: s
           ? <div className="callout ok">{refreshMsg.text}</div>
           : <ErrorBox title={refreshMsg.text} action={refreshMsg.action} />)}
       </div>
+
+      {e.marketing && (
+        <MarketingPanel m={e.marketing} tz={tz}
+          onRename={org.role === "admin" ? async (code, label) => { await api.setTrackingLabel(org.id, code, label); reload(); } : undefined} />
+      )}
 
       <SyncStatus e={e} tz={tz} />
 
@@ -753,5 +764,110 @@ function ConnectionsTable({ data, results, canTest, onTest, tz }: {
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ------------------------------------------------------------------ marketing (D13)
+
+function MarketingPanel({ m, tz, onRename }: { m: MarketingSummary; tz: string; onRename?: (code: string, label: string | null) => Promise<void> }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const save = async (ev: FormEvent, code: string) => {
+    ev.preventDefault();
+    setError(null);
+    try {
+      await onRename!(code, draft.trim() || null);
+      setEditing(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const max = Math.max(1, ...m.drivers.map((d) => d.paidTickets), m.unattributed.paidTickets);
+  const sent = (iso: string | null) => (iso ? new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" }).format(new Date(iso)) : "—");
+  return (
+    <section className="card marketing" aria-labelledby="mk-h">
+      <div className="card-title-row">
+        <h2 id="mk-h" className="card-title">What's driving sales</h2>
+        <span className="small muted">{m.trackedShare}% of paid tickets linked to marketing ({m.attributedTickets} of {m.paidTickets})</span>
+      </div>
+      <p className="small muted">
+        Paid tickets by the tracking link each order came through. Email campaigns count only within {m.windowDays} days of sending; one source per order. Gross is after refunds, before fees.
+      </p>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th scope="col">Source</th>
+              <th scope="col">Type</th>
+              <th scope="col" className="num">Paid tickets</th>
+              <th scope="col" className="share-col"><span className="sr-only">Share of tickets</span></th>
+              <th scope="col" className="num">Orders</th>
+              <th scope="col" className="num">Gross after refunds</th>
+              <th scope="col" className="num">Orders per 100 clicks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {m.drivers.map((d) => (
+              <tr key={`${d.kind}:${d.campaign?.id ?? d.code}`}>
+                <th scope="row">
+                  {editing === d.code ? (
+                    <form className="rename" onSubmit={(ev) => save(ev, d.code)}>
+                      <label className="sr-only" htmlFor={`rn-${d.code}`}>Name for {d.code}</label>
+                      <input id={`rn-${d.code}`} value={draft} maxLength={80} onChange={(ev) => setDraft(ev.target.value)} placeholder="e.g. Instagram bio link" autoFocus />
+                      <button type="submit" className="secondary">Save</button>
+                      <button type="button" className="link" onClick={() => setEditing(null)}>Cancel</button>
+                      {error && <span className="form-error small" role="alert">{error}</span>}
+                    </form>
+                  ) : (
+                    <>
+                      {d.label}
+                      {onRename && d.kind === "tracking_link" && (
+                        <button className="link small rename-btn" onClick={() => { setEditing(d.code); setDraft(d.label === d.code ? "" : d.label); }} aria-label={`Rename ${d.code}`}>Rename</button>
+                      )}
+                    </>
+                  )}
+                  <div className="small muted"><code>{d.code}</code>{d.campaign ? ` · sent ${sent(d.campaign.sentAt)} · ${d.campaign.emailsSent?.toLocaleString("en-US") ?? "?"} emails` : ""}</div>
+                </th>
+                <td>{d.kind === "campaign" ? <span className="tag">Email · Mailchimp</span> : <span className="tag neutral">Tracking link</span>}</td>
+                <td className="num">{d.paidTickets}</td>
+                <td className="share-col"><ShareBar value={d.paidTickets} max={max} label={`${d.ticketShare}%`} /></td>
+                <td className="num">{d.orders}</td>
+                <td className="num">{d.grossAfterRefunds.map((g) => (g.minor === null ? `Unknown ${g.currency}` : formatMoney(g.minor, g.currency))).join(" · ") || "—"}</td>
+                <td className="num">{d.ordersPer100Clicks ?? "—"}</td>
+              </tr>
+            ))}
+            <tr className="unattributed">
+              <th scope="row">No tracking link<div className="small muted">Bought without a tracked link{m.conflictingOrders ? `, or with conflicting links (${m.conflictingOrders})` : ""}</div></th>
+              <td><span className="tag neutral">Unattributed</span></td>
+              <td className="num">{m.unattributed.paidTickets}</td>
+              <td className="share-col"><ShareBar value={m.unattributed.paidTickets} max={max} label={`${m.paidTickets ? Math.floor((m.unattributed.paidTickets * 100) / m.paidTickets) : 0}%`} muted /></td>
+              <td className="num">{m.unattributed.orders}</td>
+              <td className="num">—</td>
+              <td className="num">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {(m.outsideWindow.length > 0 || m.campaignsWithoutOrders.length > 0) && (
+        <ul className="small mk-notes">
+          {m.outsideWindow.map((o) => (
+            <li key={o.code}>{o.paidTickets} tickets ({o.orders} orders) came through <strong>{o.title}</strong>'s link more than {m.windowDays} days after it was sent, so they are not credited to it.</li>
+          ))}
+          {m.campaignsWithoutOrders.map((c) => (
+            <li key={c.id}><strong>{c.title}</strong> (sent {sent(c.sentAt)}{c.eventLinkClicks !== null ? `, ${c.eventLinkClicks} unique clicks to this show` : ""}) has no linked orders.</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ShareBar({ value, max, label, muted }: { value: number; max: number; label: string; muted?: boolean }) {
+  return (
+    <span className="share">
+      <span className="share-track"><span className={muted ? "share-fill muted" : "share-fill"} style={{ width: `${(value / max) * 100}%` }} /></span>
+      <span className="share-label">{label}</span>
+    </span>
   );
 }

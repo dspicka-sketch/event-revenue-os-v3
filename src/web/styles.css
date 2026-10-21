@@ -167,3 +167,20 @@ table.data.compact th, table.data.compact td { padding: 4px 8px; }
 :root[data-theme="dark"] { --chart-series-1: #3987e5; }
 table.data td .tag { white-space: normal; }
 main { max-width: 1320px; }
+
+/* --- marketing (D13) --- */
+.marketing { border-color: var(--accent); }
+.marketing .card-title { font-size: 1.15rem; }
+.share-col { width: 22%; min-width: 120px; }
+.share { display: flex; align-items: center; gap: 8px; }
+.share-track { flex: 1; height: 10px; background: var(--info-bg); border-radius: 5px; overflow: hidden; }
+.share-fill { display: block; height: 100%; background: var(--chart-series-1); border-radius: 5px; }
+.share-fill.muted { background: var(--muted); opacity: 0.45; }
+.share-label { font-variant-numeric: tabular-nums; font-size: 0.85rem; min-width: 3ch; text-align: right; }
+tr.unattributed th, tr.unattributed td { color: var(--muted); }
+.tag.neutral { background: var(--border); color: var(--text); }
+.mk-notes { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
+.driver-cell strong { display: block; font-weight: 600; }
+.rename { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.rename input { font: inherit; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); min-width: 0; width: 14em; max-width: 100%; }
+.rename-btn { margin-left: 8px; font-weight: 400; }

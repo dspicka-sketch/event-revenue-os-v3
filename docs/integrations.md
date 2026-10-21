@@ -96,3 +96,30 @@ Each Eventbrite series occurrence has its own event ID (`series_id` links them).
 ### Privacy
 
 Never read or stored: attendee `profile` (name, email, phone, address), barcodes, answers. Kept for audit only: IDs, statuses, ticket class, quantity, money components and timestamps.
+
+## Eventbrite tracking links (M2, marketing linkage, D13)
+
+| Item | Value | Status |
+|---|---|---|
+| Tracking link format | Event URL with `?aff=CODE`, created under Marketing → Tracking links in the event dashboard | SECONDHAND (Eventbrite help article via search) |
+| Where the code appears in the API | `affiliate` on the **attendee** record ("the affiliate code if the ticket was purchased through an affiliate"). No order-level field found. | SECONDHAND (Workato connector docs). `probe:eventbrite` lists attendee keys so this can be confirmed live |
+| Handling | Trimmed and accepted only if it matches `[A-Za-z0-9._~-]{1,100}`, otherwise treated as absent. An order with two different codes is "conflicting" and left unattributed | Implementation |
+
+## Mailchimp (M2, read-only)
+
+Research conditions: `mailchimp.com` is blocked by this environment's network policy. The official docs pages were read only through search-engine excerpts of `mailchimp.com/developer/marketing/api/...` pages.
+
+| Item | Value | Status |
+|---|---|---|
+| Base URL | `https://<dc>.api.mailchimp.com/3.0/`, with `<dc>` taken from the API key suffix (`…-us21`) | DOC-EXCERPT |
+| Auth | HTTP Basic with any username and the API key as password (OAuth bearer also documented) | DOC-EXCERPT |
+| Account check | `GET /` returns `account_id`; RevOS refuses a key from a different account | ASSUMED field name |
+| Campaign reports | `GET /reports?since_send_time=…&count=&offset=` returns `reports[]` with `id`, `campaign_title`, `subject_line`, `emails_sent`, `send_time`, `opens.unique_opens`, plus `total_items` | DOC-EXCERPT (field names partly ASSUMED) |
+| Link clicks | `GET /reports/{campaign_id}/click-details` returns `urls_clicked[]` with `url`, `total_clicks`, `unique_clicks` (A/B campaigns only; multivariate campaigns are not supported by this endpoint) | DOC-EXCERPT |
+| Pagination | `count` / `offset` with `total_items`; RevOS pages at 100, with a 50-page bound | DOC-EXCERPT (max count ASSUMED) |
+| Not used | Mailchimp e-commerce "attributed revenue", list/member/email-activity endpoints (subscriber-level personal data) | Policy |
+| Clicks semantics | Unique clicks are summed per distinct link to the same show; one person clicking two links counts twice. Labeled "per 100 clicks" | Implementation |
+
+## Prism.fm (M3, deals/budgets/settlements, D14)
+
+No public API documentation was found (search, 2026-10-21). Prism.fm advertises ticketing integrations (Eventbrite, Etix, See Tickets); third-party directories mention API-key access through a developer portal; consultancies build custom connections. **BLOCKED:** Daniel needs to ask Prism.fm for API access, documentation and terms. No endpoint will be written until those exist.

@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } 
 import { Stack, useLocalSearchParams } from "expo-router";
 import type { EventDetailResponse } from "@revos/shared/apiTypes";
 import { PaceBars } from "../../../components/PaceBars";
+import { DriverRowView, UnattributedRow } from "../../../components/Drivers";
 import { AttentionRow, Card, FixtureBanner, Pill, Stat, TargetMeter, s } from "../../../components/ui";
 import { ago, formatMoney, showDate, whenLabel } from "../../../lib/format";
 import { ApiError } from "../../../lib/api";
@@ -61,6 +62,24 @@ export default function ShowScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}>
         <Text style={{ color: t.text, fontSize: 22, fontWeight: "800" }}>{card.name}</Text>
         <Text style={{ color: t.muted, marginBottom: 12 }}>{showDate(card.performanceStartUtc, card.venueTimezone)}</Text>
+
+        {data.event.marketing && (() => {
+          const m = data.event.marketing;
+          const max = Math.max(1, ...m.drivers.map((d) => d.paidTickets), m.unattributed.paidTickets);
+          return (
+            <Card>
+              <Text style={{ color: t.text, fontWeight: "700" }}>What's driving sales</Text>
+              <Text style={{ color: t.muted, fontSize: 12, marginTop: 2 }}>
+                {m.trackedShare}% of paid tickets linked to marketing ({m.attributedTickets} of {m.paidTickets}). Emails count within {m.windowDays} days of sending.
+              </Text>
+              {m.drivers.map((d) => <DriverRowView key={`${d.kind}:${d.campaign?.id ?? d.code}`} d={d} max={max} detailed />)}
+              <UnattributedRow tickets={m.unattributed.paidTickets} total={m.paidTickets} max={max} />
+              {m.campaignsWithoutOrders.map((c) => (
+                <Text key={c.id} style={{ color: t.muted, fontSize: 12, marginTop: 8 }}>"{c.title}" has no linked orders{c.eventLinkClicks !== null ? ` (${c.eventLinkClicks} clicks to this show)` : ""}.</Text>
+              ))}
+            </Card>
+          );
+        })()}
 
         {card.attention.length > 0 && (
           <Card>

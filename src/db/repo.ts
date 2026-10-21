@@ -589,3 +589,20 @@ export async function campaignRefsForEvent(db: Queryable, orgId: string, eventPr
     eventLinkClicks: r.any_null ? null : r.clicks,
   }));
 }
+
+export async function trackingLabels(db: Queryable, orgId: string): Promise<Record<string, string>> {
+  const rows = (await db.query<{ code: string; label: string }>("SELECT code, label FROM tracking_link_labels WHERE organization_id = $1", [orgId])).rows;
+  return Object.fromEntries(rows.map((r) => [r.code, r.label]));
+}
+
+export async function setTrackingLabel(db: Queryable, orgId: string, code: string, label: string | null, userId: string): Promise<void> {
+  if (label === null) {
+    await db.query("DELETE FROM tracking_link_labels WHERE organization_id = $1 AND code = $2", [orgId, code]);
+    return;
+  }
+  await db.query(
+    `INSERT INTO tracking_link_labels (organization_id, code, label, updated_by) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (organization_id, code) DO UPDATE SET label = EXCLUDED.label, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [orgId, code, label, userId],
+  );
+}

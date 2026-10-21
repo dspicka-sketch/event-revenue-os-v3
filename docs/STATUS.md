@@ -31,11 +31,20 @@ _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (s
 - `npm run probe:eventbrite`: a read-only, PII-free diagnostic for the first live run (see integrations.md).
 - The desktop "last 7 days" figure now has one definition (venue-local sale days through today), matching mobile.
 
+### M2: "Which marketing is working" (2026-10-21, fixture; live gate pending)
+After reviewing the demo, Daniel chose marketing effectiveness as RevOS's lead (D13). Deal terms come from Prism.fm (D14, BLOCKED on API access).
+- **Linkage:** the Eventbrite tracking-link code (`aff`) is captured per ticket. Attribution engine `src/domain/marketing.ts`: one source per order; email campaigns only within 7 days of sending; conflicting codes and orders without a code stay unattributed and visible; refunds reduce credited revenue.
+- **Mailchimp connector:** read-only, campaign aggregates only. It reads sends, opens and link clicks, maps campaigns to shows and tracking codes automatically from their Eventbrite link URLs, and never reads subscriber data or Mailchimp's own "attributed revenue".
+- **One Refresh** updates the show and the organization's Mailchimp sources.
+- **Desktop:** "What's driving sales" is the first panel on a show (source, type, paid tickets, share, orders, gross, orders per 100 clicks, untracked row, late-use and no-order notes), and the show list has a "Top driver" column. Admins can name tracking links.
+- **Mobile:** show cards lead with "Driving sales" (top 3); the show screen lists every source.
+- **Attention rules:** "most sales aren't linked to marketing" and "recent campaign with no linked orders".
+
 ## Verification actually performed (2026-10-21)
 
 | Check | Result |
 |---|---|
-| `npm run check` (local PostgreSQL 16) | typecheck OK; **72/72 tests** passed (money 6, revenue 13, pulse 8, Eventbrite client 10, probe 4, DB sync 15, HTTP API 16); web build OK; secret/PII scan clean |
+| `npm run check` (local PostgreSQL 16) | typecheck OK; **94/94 tests** passed (money 6, revenue 13, pulse 10, marketing 8, marketing sync 4, Mailchimp 6, Eventbrite client 10, probe 4, DB sync 15, HTTP API 18); web build OK; secret/PII scan clean |
 | Mobile `npm run typecheck` / `npm test` | OK / 6/6 passed |
 | `npx expo export --platform web` and `--platform ios` | Both bundles built (iOS Hermes bytecode, 2.7 MB), including the shared domain modules |
 | Desktop manual run (Playwright, 1280 px and 390 px) | sign-in → shows → show detail (pace tooltip) → integrations (test connection). No horizontal overflow at 390 px after fixing a hidden-header overflow bug |
@@ -56,6 +65,7 @@ Not verified: the app on a physical iPhone or Android phone, or in a simulator. 
 - Mobile: on-device test, app icon/splash, push notifications and store distribution are not done.
 
 ## Next actions for Daniel
+0. **Ask Prism.fm for API access** (documentation, auth and terms) for deals, budgets and settlements. This blocks M3.
 
 1. **Run the live Eventbrite read** on your own machine. Start with `npm run probe:eventbrite` and send the developer the `reports/eventbrite-probe-*.md` file it writes (it contains no customer data). Then follow README → Live setup. Alternatively, allow `www.eventbriteapi.com` in this environment's network settings and add the token as an environment secret.
 2. **Try the mobile app** on your phone: `HOST=0.0.0.0 npm start` at the repo root, then `cd mobile && npx expo start` and open it in Expo Go.

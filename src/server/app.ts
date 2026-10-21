@@ -9,7 +9,7 @@ import fastifyCors from "@fastify/cors";
 import { authenticate, listMemberOrganizations, login, LoginThrottle, logout, roleIn, type AuthedUser, type Role } from "../auth/accounts.js";
 import type { Db } from "../db/pool.js";
 import {
-  campaignRefsForEvent, listConnectionsByProvider, loadEventRecords,
+  campaignRefsForEvent, listConnectionsByProvider, loadEventRecords, setTrackingLabel, trackingLabels,
   deleteTarget, getEventSummary, getConnection, getOrganization, listConnections, listEventSummaries, listSyncRuns, listTargets,
   ticketClassBreakdown, upsertTarget, type EventSummaryRow, type TargetRow,
 } from "../db/repo.js";
@@ -142,10 +142,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const marketingFactory = opts.marketingAdapterFactory ?? defaultMarketingAdapterFactory;
 
   /** Attribution for one show from stored tickets and stored campaigns (D13). */
-  async function marketingFor(orgId: string, r: EventSummaryRow): Promise<MarketingSummary | null> {
+  async function marketingFor(orgId: string, r: EventSummaryRow, labels?: Record<string, string>): Promise<MarketingSummary | null> {
     if (!r.latest_result) return null;
-    const [rec, refs] = await Promise.all([loadEventRecords(db, orgId, r.id), campaignRefsForEvent(db, orgId, r.provider, r.source_event_id)]);
-    return computeMarketing(rec.orders, rec.lines, refs);
+    const [rec, refs, names] = await Promise.all([
+      loadEventRecords(db, orgId, r.id),
+      campaignRefsForEvent(db, orgId, r.provider, r.source_event_id),
+      labels ?? trackingLabels(db, orgId),
+    ]);
+    return computeMarketing(rec.orders, rec.lines, refs, { labels: names });
   }
   const now = opts.now ?? (() => new Date());
   const throttle = new LoginThrottle();
@@ -222,8 +226,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // ---- shows
 
   async function loadEvents(orgId: string): Promise<EventDto[]> {
-    const [rows, targets] = await Promise.all([listEventSummaries(db, orgId), listTargets(db, orgId)]);
-    return Promise.all(rows.map(async (r) => eventDto(r, targetsFor(targets, r.id), await marketingFor(orgId, r))));
+    const [rows, targets, labels] = await Promise.all([listEventSummaries(db, orgId), listTargets(db, orgId), trackingLabels(db, orgId)]);
+    return Promise.all(rows.map(async (r) => eventDto(r, targetsFor(targets, r.id), await marketingFor(orgId, r, labels))));
   }
 
   app.get<{ Params: { orgId: string } }>("/api/orgs/:orgId/pulse", async (req, reply) => {
@@ -306,6 +310,22 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (!org) return;
     if (!UUID.test(req.params.eventId) || !MEASURES.has(req.params.measure)) return reply.code(404).send({ error: "not_found" });
     await deleteTarget(db, org.id, req.params.eventId, req.params.measure);
+    return { ok: true };
+  });
+
+  // ---- tracking-link names (admin)
+
+  app.put<{ Params: { orgId: string; code: string }; Body: { label?: unknown } }>("/api/orgs/:orgId/tracking-links/:code", async (req, reply) => {
+    const org = await orgFor(req, reply, "admin");
+    if (!org) return;
+    const { code } = req.params;
+    if (!/^[A-Za-z0-9._~-]{1,100}$/.test(code)) return reply.code(400).send({ error: "bad_request", message: "Not a valid tracking code." });
+    const raw = req.body?.label;
+    const label = typeof raw === "string" ? raw.trim() : raw === null ? null : undefined;
+    if (label === undefined || (label !== null && (label.length < 1 || label.length > 80))) {
+      return reply.code(400).send({ error: "bad_request", message: "Name must be 1–80 characters, or null to clear it." });
+    }
+    await setTrackingLabel(db, org.id, code, label, req.user!.userId);
     return { ok: true };
   });
 

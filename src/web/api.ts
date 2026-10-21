@@ -42,6 +42,8 @@ export const api = {
   refresh: (orgId: string, eventId: string) => call<RefreshResponse>(`/api/orgs/${orgId}/events/${eventId}/refresh`, { method: "POST" }),
   setTarget: (orgId: string, eventId: string, t: TargetRequest) => call<{ ok: true }>(`/api/orgs/${orgId}/events/${eventId}/targets`, json("PUT", t)),
   deleteTarget: (orgId: string, eventId: string, measure: string) => call<{ ok: true }>(`/api/orgs/${orgId}/events/${eventId}/targets/${measure}`, { method: "DELETE" }),
+  setTrackingLabel: (orgId: string, code: string, label: string | null) =>
+    call<{ ok: true }>(`/api/orgs/${orgId}/tracking-links/${encodeURIComponent(code)}`, json("PUT", { label })),
   connections: (orgId: string) => call<ConnectionsResponse>(`/api/orgs/${orgId}/connections`),
   testConnection: (orgId: string, connectionId: string) =>
     call<{ ok: boolean; message: string }>(`/api/orgs/${orgId}/connections/${connectionId}/test`, { method: "POST" }),

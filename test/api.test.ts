@@ -112,6 +112,17 @@ describeDb("HTTP API", () => {
     expect(test.json()).toMatchObject({ ok: true });
   });
 
+  it("lets admins name tracking links, used in place of the raw code", async () => {
+    const url = `/api/orgs/${orgId}/tracking-links/ig-bio`;
+    expect((await app.inject({ method: "PUT", url, headers: viewer, payload: { label: "Instagram bio link" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PUT", url, headers: admin, payload: { label: "" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url: `/api/orgs/${orgId}/tracking-links/bad%20code`, headers: admin, payload: { label: "x" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url, headers: admin, payload: { label: "Instagram bio link" } })).statusCode).toBe(200);
+    const d = (await app.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: viewer })).json() as EventDetailResponse;
+    const ig = d.event.marketing!.drivers.find((x) => x.code === "ig-bio");
+    expect(ig?.label).toBe("Instagram bio link");
+  });
+
   it("lets only admins set targets, and validates them", async () => {
     const url = `/api/orgs/${orgId}/events/${eventId}/targets`;
     expect((await app.inject({ method: "PUT", url, headers: viewer, payload: { measure: "paidTickets", value: 400, currency: null } })).statusCode).toBe(403);

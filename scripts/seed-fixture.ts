@@ -2,11 +2,13 @@
 // synthetic show. Never touches live organizations.
 import { createPool } from "../src/db/pool.js";
 import { migrate } from "../src/db/migrate.js";
-import { createConnection, createMappedEvent, createOrganization, upsertTarget } from "../src/db/repo.js";
+import { createConnection, createMappedEvent, createOrganization, setTrackingLabel, upsertTarget } from "../src/db/repo.js";
 import { createUser, findUserId, setMembership } from "../src/auth/accounts.js";
 import { generatePassword } from "../src/auth/password.js";
 import { FIXTURE_ACCOUNT_ID, pilotFixture } from "../src/providers/eventbrite/fixtures.js";
 import { syncEvent } from "../src/sync/syncEvent.js";
+import { syncMarketingConnection } from "../src/sync/syncMarketing.js";
+import { FIXTURE_MC_ACCOUNT_ID } from "../src/providers/mailchimp/fixtures.js";
 
 const DEMO_EMAIL = "demo@example.com";
 const db = createPool();
@@ -44,6 +46,12 @@ try {
       const out = await syncEvent(db, org.id, canonicalEventId);
       console.log(`Fixture event ${ev.event.id}: ${out.ok ? "synced" : `FAILED ${out.kind}: ${out.message}`}`);
     }
+    for (const [code, label] of [["ig-bio", "Instagram bio link"], ["fb-ads", "Facebook & Instagram ads"], ["venue-site", "Venue website"]] as const) {
+      await setTrackingLabel(db, org.id, code, label, userId);
+    }
+    const mc = await createConnection(db, { organizationId: org.id, provider: "mailchimp", providerAccountId: FIXTURE_MC_ACCOUNT_ID, mode: "fixture", secretRef: null });
+    const mout = await syncMarketingConnection(db, org.id, mc.id);
+    console.log(`Fixture Mailchimp: ${mout.ok ? `${mout.campaigns} campaigns` : `FAILED ${mout.kind}: ${mout.message}`}`);
     console.log(`Fixture organization created: ${org.id}`);
   }
 } finally {
