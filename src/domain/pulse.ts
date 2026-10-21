@@ -4,6 +4,7 @@
 
 import { addMinor, currencyScale, type Measure, type MeasureStatus, type MinorUnits } from "./money.js";
 import { localDate, type DailySales, type EventRevenue, type ReconciliationRow } from "./revenue.js";
+import type { DriverRow, MarketingSummary } from "./marketing.js";
 
 export type TargetMeasure = "paidTickets" | "grossAfterRefunds" | "organizerProceeds";
 
@@ -31,6 +32,8 @@ export interface ShowInput {
   revenue: EventRevenue | null;
   reportComparison: ReconciliationRow[] | null;
   targets: Target[];
+  /** Attribution summary for this show (D13); null when no sales data yet. */
+  marketing: MarketingSummary | null;
 }
 
 export type AttentionSeverity = "error" | "warning" | "info";
@@ -38,7 +41,8 @@ export type AttentionSeverity = "error" | "warning" | "info";
 export interface AttentionItem {
   code:
     | "not_configured" | "sync_error" | "stale" | "never_synced" | "not_refreshed_recently"
-    | "reconciliation_difference" | "review_exceptions" | "behind_target" | "multiple_currencies" | "counts_partial";
+    | "reconciliation_difference" | "review_exceptions" | "behind_target" | "multiple_currencies" | "counts_partial"
+    | "untracked_sales" | "campaign_no_orders";
   severity: AttentionSeverity;
   title: string;
   detail: string;
@@ -86,6 +90,16 @@ export interface ShowCard {
     previous7DaysPaidTickets: number;
   } | null;
   targets: TargetProgress[];
+  /** The glanceable "what's driving sales" summary (D13). */
+  marketing: {
+    trackedShare: number;
+    paidTickets: number;
+    attributedTickets: number;
+    unattributedTickets: number;
+    /** Top drivers by paid tickets (at most 3). */
+    topDrivers: DriverRow[];
+    driverCount: number;
+  } | null;
   freshness: { connectionStatus: string; stale: boolean; dataAsOf: string | null; ageHours: number | null };
   attention: AttentionItem[];
 }
@@ -219,6 +233,24 @@ export function buildShowCard(input: ShowInput, now: Date, opts: { staleAfterHou
     return { measure: t.measure, label: TARGET_LABELS[t.measure], unit, currency: t.currency, target: t.value, actual, actualStatus, percent, status, requiredPerDay, recentPerDay, source: t.source };
   });
 
+  // Marketing (D13).
+  const mk = input.marketing;
+  if (mk && mk.paidTickets >= 20 && mk.trackedShare < 40) {
+    attention.push({
+      code: "untracked_sales", severity: "info", title: "Most sales aren't linked to marketing",
+      detail: `Only ${mk.trackedShare}% of paid tickets came through a tracking link. Use Eventbrite tracking links (aff codes) in emails, social posts and ads so RevOS can show what's working.`,
+    });
+  }
+  for (const c of mk?.campaignsWithoutOrders ?? []) {
+    if (!c.sentAt) continue;
+    const ago = Math.floor((now.getTime() - Date.parse(c.sentAt)) / DAY);
+    if (ago < 1 || ago > 7 || (phase !== "upcoming" && phase !== "today")) continue;
+    attention.push({
+      code: "campaign_no_orders", severity: "info", title: `"${c.title}" has no linked orders yet`,
+      detail: `Sent ${ago} day${ago === 1 ? "" : "s"} ago${c.eventLinkClicks !== null ? `, ${c.eventLinkClicks} unique clicks to this show` : ""}. Check that its links carry a tracking code.`,
+    });
+  }
+
   attention.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
 
   return {
@@ -236,6 +268,16 @@ export function buildShowCard(input: ShowInput, now: Date, opts: { staleAfterHou
     revenue: primary ? { grossAfterRefunds: primary.measures.grossAfterRefunds, organizerProceeds: primary.measures.organizerProceeds } : null,
     pace,
     targets,
+    marketing: mk
+      ? {
+          trackedShare: mk.trackedShare,
+          paidTickets: mk.paidTickets,
+          attributedTickets: mk.attributedTickets,
+          unattributedTickets: mk.unattributed.paidTickets,
+          topDrivers: mk.drivers.slice(0, 3),
+          driverCount: mk.drivers.length,
+        }
+      : null,
     freshness: { connectionStatus: input.connectionStatus, stale: input.stale, dataAsOf: input.dataAsOf, ageHours },
     attention,
   };

@@ -4,8 +4,9 @@
 import type { MeasureStatus } from "../domain/money.js";
 import type { OrgPulse, ShowCard, Target, TargetMeasure } from "../domain/pulse.js";
 import type { EventRevenue, ReconciliationRow, SourceReportFigures } from "../domain/revenue.js";
+import type { DriverRow, MarketingSummary } from "../domain/marketing.js";
 
-export type { OrgPulse, ShowCard, Target, TargetMeasure, MeasureStatus };
+export type { OrgPulse, ShowCard, Target, TargetMeasure, MeasureStatus, MarketingSummary, DriverRow };
 
 export type Role = "admin" | "viewer";
 
@@ -52,6 +53,8 @@ export interface EventDto {
   sourceReport: SourceReportFigures | null;
   reportComparison: ReconciliationRow[] | null;
   targets: Target[];
+  /** "What's driving sales" (D13); null until the show has sales data. */
+  marketing: MarketingSummary | null;
 }
 
 export interface EventsResponse {
@@ -88,6 +91,8 @@ export interface ConnectionDto {
   lastSuccessAt: string | null;
   proceedsPolicy: string;
   mappedEvents: number;
+  /** Campaigns stored for a marketing connection. */
+  campaigns: number;
   lastRunStatus: string | null;
   lastRunAt: string | null;
 }
@@ -105,6 +110,8 @@ export interface RefreshResponse {
   kind?: string;
   message?: string;
   action?: string;
+  /** Marketing sources refreshed alongside the show. A failure here does not fail the show refresh. */
+  marketing?: { provider: string; ok: boolean; kind?: string; message?: string }[];
 }
 
 export interface TargetRequest {

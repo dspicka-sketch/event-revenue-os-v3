@@ -23,7 +23,7 @@ function input(over: Partial<ShowInput> = {}): ShowInput {
     id: "e1", name: "Show", performanceStartUtc: "2026-10-31T03:00:00Z", venueTimezone: TZ, provider: "eventbrite", mode: "fixture",
     connectionStatus: "fixture", connectionStatusKind: null, connectionAction: null, stale: false, dataAsOf: "2026-10-20T18:00:00Z",
     revenue: revenueWithSales([{ created: "2026-10-19T20:00:00Z", qty: 7 }, { created: "2026-10-01T20:00:00Z", qty: 3 }]),
-    reportComparison: null, targets: [], ...over,
+    reportComparison: null, targets: [], marketing: null, ...over,
   };
 }
 
@@ -76,6 +76,28 @@ describe("buildShowCard", () => {
     expect(buildShowCard(input({ revenue: null, connectionStatus: "not_configured" }), NOW).attention[0]).toMatchObject({ code: "not_configured", severity: "error" });
     expect(buildShowCard(input({ dataAsOf: "2026-10-17T18:00:00Z" }), NOW).attention.map((a) => a.code)).toContain("not_refreshed_recently");
     expect(buildShowCard(input({ revenue: null }), NOW).attention.map((a) => a.code)).toContain("never_synced");
+  });
+});
+
+describe("marketing on the show card", () => {
+  const base = { windowDays: 7, salesOrders: 30, paidTickets: 60, attributedOrders: 5, attributedTickets: 12, trackedShare: 20, outsideWindow: [], conflictingOrders: 0, unattributed: { orders: 25, paidTickets: 48 } };
+  const driver = (code: string, t: number) => ({ code, label: code, kind: "tracking_link" as const, campaign: null, orders: 1, paidTickets: t, grossAfterRefunds: [], ticketShare: 0, ordersPer100Clicks: null });
+
+  it("summarizes the top drivers and flags mostly untracked sales", () => {
+    const c = buildShowCard(input({ marketing: { ...base, drivers: [driver("a", 6), driver("b", 4), driver("c", 1), driver("d", 1)], campaignsWithoutOrders: [] } }), NOW);
+    expect(c.marketing).toMatchObject({ trackedShare: 20, driverCount: 4, unattributedTickets: 48 });
+    expect(c.marketing!.topDrivers.map((d) => d.code)).toEqual(["a", "b", "c"]);
+    expect(c.attention.map((a) => a.code)).toContain("untracked_sales");
+  });
+
+  it("flags a recent campaign with no linked orders, but not an old one", () => {
+    const recent = { id: "c1", title: "Last call", sentAt: "2026-10-18T17:00:00Z", eventLinkClicks: 90 };
+    const old = { id: "c2", title: "Announce", sentAt: "2026-09-02T17:00:00Z", eventLinkClicks: 300 };
+    const c = buildShowCard(input({ marketing: { ...base, trackedShare: 80, drivers: [], campaignsWithoutOrders: [recent, old] } }), NOW);
+    const items = c.attention.filter((a) => a.code === "campaign_no_orders");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.title).toContain("Last call");
+    expect(items[0]!.detail).toContain("90 unique clicks");
   });
 });
 

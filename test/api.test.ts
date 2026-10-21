@@ -16,6 +16,7 @@ describeDb("HTTP API", () => {
   let liveOrgId: string;
   let eventId: string;
   let connId: string;
+  let mcConnId: string;
   let failure: FixtureFailure | undefined;
   const PW = "correct horse battery staple";
   let admin: Record<string, string>;
@@ -31,6 +32,7 @@ describeDb("HTTP API", () => {
     const conn = await createConnection(db, { organizationId: org.id, provider: "eventbrite", providerAccountId: "fixture-eb-org-1", mode: "fixture", secretRef: null });
     connId = conn.id;
     eventId = (await createMappedEvent(db, { organizationId: org.id, connectionId: conn.id, sourceEventId: "fx-1001", name: "Night 1", startUtc: "2026-11-14T04:00:00Z" })).canonicalEventId;
+    mcConnId = (await createConnection(db, { organizationId: org.id, provider: "mailchimp", providerAccountId: "fixture-mc-1", mode: "fixture", secretRef: null })).id;
     orgId = org.id;
     const live = await createOrganization(db, { name: "Live", isFixture: false });
     const lc = await createConnection(db, { organizationId: live.id, provider: "eventbrite", providerAccountId: "1", mode: "live", secretRef: "REVOS_TEST_SECRET" });
@@ -92,6 +94,22 @@ describeDb("HTTP API", () => {
     expect(body.card.tickets!.paid).toBe(body.event.revenue!.currencies[0]!.tickets.paid);
     expect(body.card.phase).toBe("upcoming");
     expect(body.syncRuns[0]!.status).toBe("succeeded");
+  });
+
+  it("refreshes marketing sources with the show and returns what's driving sales", async () => {
+    const r = await app.inject({ method: "POST", url: `/api/orgs/${orgId}/events/${eventId}/refresh`, headers: viewer });
+    expect(r.json().marketing).toEqual([{ provider: "mailchimp", ok: true }]);
+    const d = (await app.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: viewer })).json() as EventDetailResponse;
+    const m = d.event.marketing!;
+    expect(m.drivers.find((x) => x.kind === "campaign")?.campaign?.source).toBe("mailchimp");
+    expect(m.attributedTickets + m.unattributed.paidTickets).toBe(m.paidTickets);
+    expect(d.card.marketing!.topDrivers.length).toBeGreaterThan(0);
+    const pulse = (await app.inject({ url: `/api/orgs/${orgId}/pulse`, headers: viewer })).json() as PulseResponse;
+    expect(pulse.shows[0]!.marketing!.trackedShare).toBe(d.card.marketing!.trackedShare);
+    const conns = (await app.inject({ url: `/api/orgs/${orgId}/connections`, headers: admin })).json();
+    expect(conns.connections.find((c: { provider: string }) => c.provider === "mailchimp").campaigns).toBe(4);
+    const test = await app.inject({ method: "POST", url: `/api/orgs/${orgId}/connections/${mcConnId}/test`, headers: admin });
+    expect(test.json()).toMatchObject({ ok: true });
   });
 
   it("lets only admins set targets, and validates them", async () => {

@@ -9,10 +9,13 @@ import fastifyCors from "@fastify/cors";
 import { authenticate, listMemberOrganizations, login, LoginThrottle, logout, roleIn, type AuthedUser, type Role } from "../auth/accounts.js";
 import type { Db } from "../db/pool.js";
 import {
+  campaignRefsForEvent, listConnectionsByProvider, loadEventRecords,
   deleteTarget, getEventSummary, getConnection, getOrganization, listConnections, listEventSummaries, listSyncRuns, listTargets,
   ticketClassBreakdown, upsertTarget, type EventSummaryRow, type TargetRow,
 } from "../db/repo.js";
 import { buildOrgPulse, buildShowCard, type ShowInput, type Target } from "../domain/pulse.js";
+import { computeMarketing, type MarketingSummary } from "../domain/marketing.js";
+import { defaultMarketingAdapterFactory, syncMarketingConnection, type MarketingAdapterFactory } from "../sync/syncMarketing.js";
 import { MEASURE_DEFINITIONS } from "../domain/revenue.js";
 import { actionFor, ProviderError } from "../providers/errors.js";
 import type {
@@ -48,6 +51,7 @@ export const SECURITY_CSP = [
 export interface AppOptions {
   db: Db;
   adapterFactory?: AdapterFactory;
+  marketingAdapterFactory?: MarketingAdapterFactory;
   webDir?: string;
   logger?: boolean;
   now?: () => Date;
@@ -74,7 +78,7 @@ function targetsFor(rows: TargetRow[], eventId: string): Target[] {
     .map((t) => ({ measure: t.measure, value: t.target_value, currency: t.currency, source: t.source, updatedAt: iso(t.updated_at) }));
 }
 
-function eventDto(r: EventSummaryRow, targets: Target[]): EventDto {
+function eventDto(r: EventSummaryRow, targets: Target[], marketing: MarketingSummary | null): EventDto {
   const latestRun = r.latest_run;
   const hasData = r.latest_result !== null;
   // Stale: there is retained data but the most recent attempt failed.
@@ -107,6 +111,7 @@ function eventDto(r: EventSummaryRow, targets: Target[]): EventDto {
     sourceReport: r.source_report,
     reportComparison: r.report_comparison,
     targets,
+    marketing,
   };
 }
 
@@ -126,6 +131,7 @@ function showInput(e: EventDto): ShowInput {
     revenue: e.revenue,
     reportComparison: e.reportComparison,
     targets: e.targets,
+    marketing: e.marketing,
   };
 }
 
@@ -133,6 +139,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ? { redact: ["req.headers.authorization"] } : false, trustProxy: false });
   const { db } = opts;
   const factory = opts.adapterFactory ?? defaultAdapterFactory;
+  const marketingFactory = opts.marketingAdapterFactory ?? defaultMarketingAdapterFactory;
+
+  /** Attribution for one show from stored tickets and stored campaigns (D13). */
+  async function marketingFor(orgId: string, r: EventSummaryRow): Promise<MarketingSummary | null> {
+    if (!r.latest_result) return null;
+    const [rec, refs] = await Promise.all([loadEventRecords(db, orgId, r.id), campaignRefsForEvent(db, orgId, r.provider, r.source_event_id)]);
+    return computeMarketing(rec.orders, rec.lines, refs);
+  }
   const now = opts.now ?? (() => new Date());
   const throttle = new LoginThrottle();
 
@@ -209,7 +223,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   async function loadEvents(orgId: string): Promise<EventDto[]> {
     const [rows, targets] = await Promise.all([listEventSummaries(db, orgId), listTargets(db, orgId)]);
-    return rows.map((r) => eventDto(r, targetsFor(targets, r.id)));
+    return Promise.all(rows.map(async (r) => eventDto(r, targetsFor(targets, r.id), await marketingFor(orgId, r))));
   }
 
   app.get<{ Params: { orgId: string } }>("/api/orgs/:orgId/pulse", async (req, reply) => {
@@ -231,7 +245,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     const { eventId } = req.params;
     const row = UUID.test(eventId) ? await getEventSummary(db, org.id, eventId) : null;
     if (!row) return reply.code(404).send({ error: "not_found" });
-    const event = eventDto(row, targetsFor(await listTargets(db, org.id), eventId));
+    const event = eventDto(row, targetsFor(await listTargets(db, org.id), eventId), await marketingFor(org.id, row));
     return {
       organization: org,
       event,
@@ -247,11 +261,21 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (!org) return;
     const { eventId } = req.params;
     if (!UUID.test(eventId)) return reply.code(404).send({ error: "not_found" });
-    const out = await syncEvent(db, org.id, eventId, factory, now, opts.refreshCooldownSeconds ?? 60);
-    if (out.ok) return { ok: true, runId: out.runId } satisfies RefreshResponse;
+    const cooldown = opts.refreshCooldownSeconds ?? 60;
+    const out = await syncEvent(db, org.id, eventId, factory, now, cooldown);
+    // One Refresh also updates the organization's marketing sources, so "what's
+    // driving sales" is current. Their failures are reported, never fatal here.
+    const marketing: NonNullable<RefreshResponse["marketing"]> = [];
+    if (out.ok || !["not_found", "busy", "cooldown"].includes(out.kind)) {
+      for (const c of await listConnectionsByProvider(db, org.id, "mailchimp")) {
+        const m = await syncMarketingConnection(db, org.id, c.id, marketingFactory, cooldown);
+        if (m.ok || m.kind !== "cooldown") marketing.push(m.ok ? { provider: c.provider, ok: true } : { provider: c.provider, ok: false, kind: m.kind, message: m.message });
+      }
+    }
+    if (out.ok) return { ok: true, runId: out.runId, marketing } satisfies RefreshResponse;
     if (out.kind === "cooldown" && out.retryAfterSeconds) reply.header("Retry-After", String(out.retryAfterSeconds));
     const code = out.kind === "not_found" && !out.runId ? 404 : out.kind === "busy" ? 409 : out.kind === "cooldown" ? 429 : 502;
-    return reply.code(code).send({ ok: false, runId: out.runId, kind: out.kind, message: out.message, action: actionFor(out.kind) } satisfies RefreshResponse);
+    return reply.code(code).send({ ok: false, runId: out.runId, kind: out.kind, message: out.message, action: actionFor(out.kind), marketing } satisfies RefreshResponse);
   });
 
   // ---- targets (plan values; admin only)
@@ -308,6 +332,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
         lastSuccessAt: iso(c.last_success_at),
         proceedsPolicy: c.proceeds_policy,
         mappedEvents: c.mapped_events,
+        campaigns: c.campaigns,
         lastRunStatus: c.last_run_status,
         lastRunAt: iso(c.last_run_at),
       })),
@@ -322,7 +347,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     const conn = UUID.test(req.params.connectionId) ? await getConnection(db, org.id, req.params.connectionId) : null;
     if (!conn) return reply.code(404).send({ error: "not_found" });
     try {
-      await factory(conn, { priorSuccesses: 0 }).validate();
+      if (conn.provider === "mailchimp") await marketingFactory(conn).validate();
+      else await factory(conn, { priorSuccesses: 0 }).validate();
       return { ok: true, message: conn.mode === "fixture" ? "Fixture transport responded. This is not a live credential check." : "Credential accepted by the provider." };
     } catch (err) {
       const kind = err instanceof ProviderError ? err.kind : "internal";

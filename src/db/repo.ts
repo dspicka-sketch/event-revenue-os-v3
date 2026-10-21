@@ -492,6 +492,7 @@ export async function deleteTarget(db: Queryable, orgId: string, eventId: string
 
 export interface ConnectionSummaryRow extends ConnectionRow {
   mapped_events: number;
+  campaigns: number;
   last_run_status: string | null;
   last_run_at: Date | null;
 }
@@ -501,6 +502,7 @@ export async function listConnections(db: Queryable, orgId: string): Promise<Con
     await db.query<ConnectionSummaryRow>(
       `SELECT c.*,
               (SELECT count(*)::int FROM source_event_mappings m WHERE m.organization_id = c.organization_id AND m.connection_id = c.id) AS mapped_events,
+              (SELECT count(*)::int FROM marketing_campaigns mc WHERE mc.organization_id = c.organization_id AND mc.connection_id = c.id) AS campaigns,
               sr.status AS last_run_status, sr.started_at AS last_run_at
        FROM source_connections c
        LEFT JOIN LATERAL (SELECT status, started_at FROM sync_runs s WHERE s.organization_id = c.organization_id AND s.connection_id = c.id
