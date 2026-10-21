@@ -171,7 +171,7 @@ Everything else (pagination field names, status values, money object semantics, 
 | Missing fees/costs/payout → unknown/partial | **Pass** |
 | 401/403, 429, timeout → specific state, bounded retries | **Pass** |
 | Failed sync after success → last good retained, stale | **Pass** (DB + API tests) |
-| Multiple performances/accounts/currencies | **Pass** for performances, orgs and currencies. Two accounts *within one org* is covered only by key design, not a dedicated test. |
+| Multiple performances/accounts/currencies | **Pass** (performances, orgs, two accounts in one org with colliding IDs, currencies) |
 | Real-source reconciliation, zero unexplained difference | **BLOCKED** (no credentials or network) |
 | Secret/privacy inspection | **Pass** (automated heuristic scan; not a manual audit) |
 | Later: resale overlap, campaign attribution | Not started (M6, M2) |

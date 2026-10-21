@@ -35,7 +35,7 @@ _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (s
 
 | Check | Result |
 |---|---|
-| `npm run check` (local PostgreSQL 16) | typecheck OK; **71/71 tests** passed (money 6, revenue 13, pulse 8, Eventbrite client 10, probe 4, DB sync 14, HTTP API 16); web build OK; secret/PII scan clean |
+| `npm run check` (local PostgreSQL 16) | typecheck OK; **72/72 tests** passed (money 6, revenue 13, pulse 8, Eventbrite client 10, probe 4, DB sync 15, HTTP API 16); web build OK; secret/PII scan clean |
 | Mobile `npm run typecheck` / `npm test` | OK / 6/6 passed |
 | `npx expo export --platform web` and `--platform ios` | Both bundles built (iOS Hermes bytecode, 2.7 MB), including the shared domain modules |
 | Desktop manual run (Playwright, 1280 px and 390 px) | sign-in → shows → show detail (pace tooltip) → integrations (test connection). No horizontal overflow at 390 px after fixing a hidden-header overflow bug |

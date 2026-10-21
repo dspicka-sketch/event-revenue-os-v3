@@ -135,6 +135,26 @@ describeDb("sync (database)", () => {
     expect(await syncEvent(db, x.org.id, y.e1, factory)).toMatchObject({ ok: false, kind: "not_found" });
   });
 
+  it("keeps two accounts in one organization apart even when source IDs collide", async () => {
+    const org = await createOrganization(db, { name: "[FIXTURE] Two accounts", isFixture: true });
+    const ids: string[] = [];
+    for (const acct of ["acct-A", "acct-B"]) {
+      const conn = await createConnection(db, { organizationId: org.id, provider: "eventbrite", providerAccountId: acct, mode: "fixture", secretRef: null });
+      ids.push((await createMappedEvent(db, { organizationId: org.id, connectionId: conn.id, sourceEventId: "fx-1001", name: acct })).canonicalEventId);
+    }
+    // Same event and order IDs served under each account's organization_id.
+    const perAccount: AdapterFactory = (c) => {
+      const events = pilotFixture();
+      events[0]!.event.organization_id = c.provider_account_id;
+      const t = createFixtureTransport({ events });
+      return new EventbriteAdapter({ token: "t", organizationId: c.provider_account_id, fetchImpl: t.fetch, sleep: async () => {} });
+    };
+    for (const id of ids) expect(await syncEvent(db, org.id, id, perAccount)).toMatchObject({ ok: true });
+    const n = data[0]!.orders.length;
+    expect(await count("orders")).toBe(2 * n);
+    for (const id of ids) expect((await loadEventRecords(db, org.id, id)).orders).toHaveLength(n);
+  });
+
   it("refuses to mix fixture and live connections in one organization", async () => {
     const live = await createOrganization(db, { name: "Live", isFixture: false });
     await expect(createConnection(db, { organizationId: live.id, provider: "eventbrite", providerAccountId: "x", mode: "fixture", secretRef: null })).rejects.toThrow();
