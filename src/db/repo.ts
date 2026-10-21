@@ -4,7 +4,8 @@
 import type pg from "pg";
 import type { EventRevenue, SourceReportFigures, ReconciliationRow } from "../domain/revenue.js";
 import { currencyScale } from "../domain/money.js";
-import type { NormalizedEvent, NormalizedLine, NormalizedOrder, ProceedsPolicy } from "../domain/types.js";
+import type { NormalizedCampaign, NormalizedEvent, NormalizedLine, NormalizedOrder, ProceedsPolicy } from "../domain/types.js";
+import type { CampaignRef } from "../domain/marketing.js";
 import type { Db } from "./pool.js";
 
 type Queryable = Db | pg.PoolClient;
@@ -133,24 +134,29 @@ export async function claimSyncRun(
   db: Db,
   orgId: string,
   connectionId: string,
-  eventId: string,
+  /** null for a connection-level sync (e.g. a marketing source). */
+  eventId: string | null,
   cooldownSeconds: number,
 ): Promise<ClaimResult> {
+  // Scope for "running", cooldown and abandonment: the event, or the connection when eventId is null.
+  const scope = eventId === null
+    ? { where: "connection_id = $2 AND canonical_event_id IS NULL", arg: connectionId }
+    : { where: "canonical_event_id = $2", arg: eventId };
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     await client.query(
       `UPDATE sync_runs SET status = 'failed', finished_at = now(), error_kind = 'abandoned',
          error_message = 'Sync did not finish within ${ABANDON_AFTER_MINUTES} minutes (server restart or crash).'
-       WHERE organization_id = $1 AND canonical_event_id = $2 AND status = 'running'
+       WHERE organization_id = $1 AND ${scope.where} AND status = 'running'
          AND started_at < now() - interval '${ABANDON_AFTER_MINUTES} minutes'`,
-      [orgId, eventId],
+      [orgId, scope.arg],
     );
     if (cooldownSeconds > 0) {
       const last = await client.query<{ wait: number }>(
         `SELECT ceil(extract(epoch FROM (max(started_at) + make_interval(secs => $3)) - now()))::int AS wait
-         FROM sync_runs WHERE organization_id = $1 AND canonical_event_id = $2`,
-        [orgId, eventId, cooldownSeconds],
+         FROM sync_runs WHERE organization_id = $1 AND ${scope.where}`,
+        [orgId, scope.arg, cooldownSeconds],
       );
       const wait = last.rows[0]?.wait;
       if (wait !== null && wait !== undefined && wait > 0) {
@@ -159,8 +165,11 @@ export async function claimSyncRun(
       }
     }
     const r = await client.query<{ id: string }>(
-      `INSERT INTO sync_runs (organization_id, connection_id, canonical_event_id, status) VALUES ($1, $2, $3, 'running')
-       ON CONFLICT (organization_id, canonical_event_id) WHERE status = 'running' DO NOTHING RETURNING id`,
+      eventId === null
+        ? `INSERT INTO sync_runs (organization_id, connection_id, canonical_event_id, status) VALUES ($1, $2, $3, 'running')
+           ON CONFLICT (organization_id, connection_id) WHERE status = 'running' AND canonical_event_id IS NULL DO NOTHING RETURNING id`
+        : `INSERT INTO sync_runs (organization_id, connection_id, canonical_event_id, status) VALUES ($1, $2, $3, 'running')
+           ON CONFLICT (organization_id, canonical_event_id) WHERE status = 'running' DO NOTHING RETURNING id`,
       [orgId, connectionId, eventId],
     );
     if (!r.rows[0]) {
@@ -500,4 +509,81 @@ export async function listConnections(db: Queryable, orgId: string): Promise<Con
       [orgId],
     )
   ).rows;
+}
+
+// ---------------------------------------------------------------- marketing (D13)
+
+export async function listConnectionsByProvider(db: Queryable, orgId: string, provider: string): Promise<ConnectionRow[]> {
+  return (await db.query<ConnectionRow>("SELECT * FROM source_connections WHERE organization_id = $1 AND provider = $2 ORDER BY provider_account_id", [orgId, provider])).rows;
+}
+
+/** Upsert a full read of a marketing connection's campaigns and replace their event links. */
+export async function persistCampaigns(
+  client: pg.PoolClient,
+  ctx: { orgId: string; connection: ConnectionRow; runId: string },
+  campaigns: NormalizedCampaign[],
+): Promise<void> {
+  const { orgId, connection: c, runId } = ctx;
+  for (const camp of campaigns) {
+    const r = await client.query<{ id: string }>(
+      `INSERT INTO marketing_campaigns (organization_id, connection_id, provider, provider_account_id, source_id, title, sent_at, emails_sent, unique_opens, last_seen_sync_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (organization_id, provider, provider_account_id, source_id) DO UPDATE SET
+         title = EXCLUDED.title, sent_at = EXCLUDED.sent_at, emails_sent = EXCLUDED.emails_sent, unique_opens = EXCLUDED.unique_opens,
+         ingested_at = now(), last_seen_sync_id = EXCLUDED.last_seen_sync_id
+       RETURNING id`,
+      [orgId, c.id, c.provider, c.provider_account_id, camp.sourceId, camp.title, camp.sentAt, camp.emailsSent, camp.uniqueOpens, runId],
+    );
+    const campaignId = r.rows[0]!.id;
+    await client.query("DELETE FROM campaign_event_links WHERE organization_id = $1 AND campaign_id = $2", [orgId, campaignId]);
+    for (const l of camp.eventLinks) {
+      await client.query(
+        `INSERT INTO campaign_event_links (organization_id, campaign_id, event_provider, source_event_id, tracking_code, unique_clicks, total_clicks)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [orgId, campaignId, l.provider, l.sourceEventId, l.trackingCode, l.uniqueClicks, l.totalClicks],
+      );
+    }
+  }
+}
+
+export async function completeConnectionSyncRun(
+  client: pg.PoolClient,
+  ctx: { orgId: string; connection: ConnectionRow; runId: string },
+  stats: { requestsMade: number; campaignsSeen: number },
+): Promise<void> {
+  await client.query(
+    "UPDATE sync_runs SET status = 'succeeded', finished_at = now(), requests_made = $3, campaigns_seen = $4 WHERE organization_id = $1 AND id = $2",
+    [ctx.orgId, ctx.runId, stats.requestsMade, stats.campaignsSeen],
+  );
+  await client.query(
+    `UPDATE source_connections SET status = $3, status_kind = NULL, status_detail = NULL, last_success_at = now()
+     WHERE organization_id = $1 AND id = $2`,
+    [ctx.orgId, ctx.connection.id, ctx.connection.mode === "live" ? "verified" : "fixture"],
+  );
+}
+
+/** Campaigns that linked to one ticketing event, shaped for computeMarketing. */
+export async function campaignRefsForEvent(db: Queryable, orgId: string, eventProvider: string, sourceEventId: string): Promise<CampaignRef[]> {
+  const rows = (
+    await db.query<{ id: string; title: string; sent_at: Date | null; emails_sent: number | null; unique_opens: number | null; codes: string[]; clicks: number | null; any_null: boolean }>(
+      `SELECT c.id, c.title, c.sent_at, c.emails_sent, c.unique_opens,
+              array_remove(array_agg(DISTINCT l.tracking_code), NULL) AS codes,
+              sum(l.unique_clicks)::int AS clicks, bool_or(l.unique_clicks IS NULL) AS any_null
+       FROM marketing_campaigns c
+       JOIN campaign_event_links l ON l.campaign_id = c.id AND l.organization_id = c.organization_id
+       WHERE c.organization_id = $1 AND l.event_provider = $2 AND l.source_event_id = $3
+       GROUP BY c.id ORDER BY c.sent_at NULLS LAST`,
+      [orgId, eventProvider, sourceEventId],
+    )
+  ).rows;
+  return rows.map((r) => ({
+    id: r.id,
+    source: "mailchimp",
+    title: r.title,
+    sentAt: r.sent_at?.toISOString() ?? null,
+    trackingCodes: r.codes,
+    emailsSent: r.emails_sent,
+    uniqueOpens: r.unique_opens,
+    eventLinkClicks: r.any_null ? null : r.clicks,
+  }));
 }
