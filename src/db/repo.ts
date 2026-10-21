@@ -116,26 +116,71 @@ export async function getEventMapping(db: Queryable, orgId: string, canonicalEve
 
 // ---------------------------------------------------------------- sync bookkeeping
 
-export async function hasRunningSync(db: Queryable, orgId: string, eventId: string): Promise<boolean> {
-  const r = await db.query(
-    "SELECT 1 FROM sync_runs WHERE organization_id = $1 AND canonical_event_id = $2 AND status = 'running' AND started_at > now() - interval '10 minutes'",
-    [orgId, eventId],
-  );
-  return (r.rowCount ?? 0) > 0;
-}
+/** A sync that has been "running" longer than this is treated as crashed. */
+export const ABANDON_AFTER_MINUTES = 10;
 
-export async function startSyncRun(db: Queryable, orgId: string, connectionId: string, eventId: string): Promise<string> {
-  const r = await db.query<{ id: string }>(
-    "INSERT INTO sync_runs (organization_id, connection_id, canonical_event_id, status) VALUES ($1, $2, $3, 'running') RETURNING id",
-    [orgId, connectionId, eventId],
-  );
-  await db.query(
-    `UPDATE source_connections SET last_attempt_at = now(),
-       status = CASE WHEN last_success_at IS NULL THEN 'verifying' ELSE status END
-     WHERE organization_id = $1 AND id = $2`,
-    [orgId, connectionId],
-  );
-  return r.rows[0]!.id;
+export type ClaimResult =
+  | { ok: true; runId: string }
+  | { ok: false; kind: "busy" }
+  | { ok: false; kind: "cooldown"; retryAfterSeconds: number };
+
+/**
+ * Atomically start a sync run for an event. Recovers runs abandoned by a crash,
+ * enforces a per-event cooldown between attempts (protects the vendor's rate
+ * limit), and relies on the unique partial index for "one running per event".
+ */
+export async function claimSyncRun(
+  db: Db,
+  orgId: string,
+  connectionId: string,
+  eventId: string,
+  cooldownSeconds: number,
+): Promise<ClaimResult> {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE sync_runs SET status = 'failed', finished_at = now(), error_kind = 'abandoned',
+         error_message = 'Sync did not finish within ${ABANDON_AFTER_MINUTES} minutes (server restart or crash).'
+       WHERE organization_id = $1 AND canonical_event_id = $2 AND status = 'running'
+         AND started_at < now() - interval '${ABANDON_AFTER_MINUTES} minutes'`,
+      [orgId, eventId],
+    );
+    if (cooldownSeconds > 0) {
+      const last = await client.query<{ wait: number }>(
+        `SELECT ceil(extract(epoch FROM (max(started_at) + make_interval(secs => $3)) - now()))::int AS wait
+         FROM sync_runs WHERE organization_id = $1 AND canonical_event_id = $2`,
+        [orgId, eventId, cooldownSeconds],
+      );
+      const wait = last.rows[0]?.wait;
+      if (wait !== null && wait !== undefined && wait > 0) {
+        await client.query("ROLLBACK");
+        return { ok: false, kind: "cooldown", retryAfterSeconds: wait };
+      }
+    }
+    const r = await client.query<{ id: string }>(
+      `INSERT INTO sync_runs (organization_id, connection_id, canonical_event_id, status) VALUES ($1, $2, $3, 'running')
+       ON CONFLICT (organization_id, canonical_event_id) WHERE status = 'running' DO NOTHING RETURNING id`,
+      [orgId, connectionId, eventId],
+    );
+    if (!r.rows[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, kind: "busy" };
+    }
+    await client.query(
+      `UPDATE source_connections SET last_attempt_at = now(),
+         status = CASE WHEN last_success_at IS NULL THEN 'verifying' ELSE status END
+       WHERE organization_id = $1 AND id = $2`,
+      [orgId, connectionId],
+    );
+    await client.query("COMMIT");
+    return { ok: true, runId: r.rows[0].id };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function countSucceededSyncs(db: Queryable, orgId: string, eventId: string): Promise<number> {

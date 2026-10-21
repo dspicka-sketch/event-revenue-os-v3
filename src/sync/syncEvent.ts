@@ -3,7 +3,7 @@
 import { computeEventRevenue, type EventRevenue } from "../domain/revenue.js";
 import type { NormalizedSnapshot } from "../domain/types.js";
 import {
-  completeSyncRun, countSucceededSyncs, failSyncRun, getEventMapping, hasRunningSync, loadEventRecords, persistSnapshot, startSyncRun,
+  claimSyncRun, completeSyncRun, countSucceededSyncs, failSyncRun, getEventMapping, loadEventRecords, persistSnapshot,
   type ConnectionRow, type UpsertCounts,
 } from "../db/repo.js";
 import type { Db } from "../db/pool.js";
@@ -36,7 +36,7 @@ export const defaultAdapterFactory: AdapterFactory = (connection, ctx) => {
 
 export type SyncOutcome =
   | { ok: true; runId: string; counts: UpsertCounts; revenue: EventRevenue }
-  | { ok: false; runId: string | null; kind: string; message: string };
+  | { ok: false; runId: string | null; kind: string; message: string; retryAfterSeconds?: number };
 
 export async function syncEvent(
   db: Db,
@@ -44,15 +44,20 @@ export async function syncEvent(
   canonicalEventId: string,
   factory: AdapterFactory = defaultAdapterFactory,
   now: () => Date = () => new Date(),
+  /** Minimum seconds between sync attempts for one event (0 = none). */
+  cooldownSeconds = 0,
 ): Promise<SyncOutcome> {
   const found = await getEventMapping(db, orgId, canonicalEventId);
   if (!found) return { ok: false, runId: null, kind: "not_found", message: "Event not found in this organization." };
   const { mapping, connection } = found;
-  if (await hasRunningSync(db, orgId, canonicalEventId)) {
-    return { ok: false, runId: null, kind: "busy", message: "A sync for this event is already running." };
-  }
   const priorSuccesses = await countSucceededSyncs(db, orgId, canonicalEventId);
-  const runId = await startSyncRun(db, orgId, connection.id, canonicalEventId);
+  const claim = await claimSyncRun(db, orgId, connection.id, canonicalEventId, cooldownSeconds);
+  if (!claim.ok) {
+    return claim.kind === "busy"
+      ? { ok: false, runId: null, kind: "busy", message: "A sync for this event is already running." }
+      : { ok: false, runId: null, kind: "cooldown", message: `This show was refreshed moments ago. Try again in ${claim.retryAfterSeconds} s.`, retryAfterSeconds: claim.retryAfterSeconds };
+  }
+  const runId = claim.runId;
 
   let snap: NormalizedSnapshot;
   try {

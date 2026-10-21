@@ -149,6 +149,45 @@ describeDb("sync (database)", () => {
     expect((await getEventSummary(db, org.id, canonicalEventId))!.connection_status).toBe("not_configured");
   });
 
+  it("lets only one of two concurrent syncs of the same event run", async () => {
+    const { org, e1 } = await setup();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow: AdapterFactory = (c, ctx) => {
+      const inner = factory(c, ctx);
+      return { validate: () => inner.validate(), fetchEventSnapshot: async (id) => { await gate; return inner.fetchEventSnapshot(id); } };
+    };
+    const first = syncEvent(db, org.id, e1, slow);
+    await new Promise((r) => setTimeout(r, 100)); // first has claimed the run and is waiting on the vendor
+    const second = await syncEvent(db, org.id, e1, slow);
+    release();
+    expect(second).toMatchObject({ ok: false, kind: "busy" });
+    expect(await first).toMatchObject({ ok: true });
+    const runs = await db.query("SELECT status FROM sync_runs WHERE canonical_event_id = $1", [e1]);
+    expect(runs.rows.map((r) => r.status)).toEqual(["succeeded"]);
+  });
+
+  it("recovers a run abandoned by a crash and lets the next sync proceed", async () => {
+    const { org, conn, e1 } = await setup();
+    await db.query(
+      "INSERT INTO sync_runs (organization_id, connection_id, canonical_event_id, status, started_at) VALUES ($1, $2, $3, 'running', now() - interval '11 minutes')",
+      [org.id, conn.id, e1],
+    );
+    expect(await syncEvent(db, org.id, e1, factory)).toMatchObject({ ok: true });
+    const runs = await db.query("SELECT status, error_kind FROM sync_runs WHERE canonical_event_id = $1 ORDER BY started_at", [e1]);
+    expect(runs.rows).toEqual([{ status: "failed", error_kind: "abandoned" }, { status: "succeeded", error_kind: null }]);
+  });
+
+  it("enforces a cooldown between refreshes of one event", async () => {
+    const { org, e1, e2 } = await setup();
+    expect(await syncEvent(db, org.id, e1, factory, undefined, 60)).toMatchObject({ ok: true });
+    const again = await syncEvent(db, org.id, e1, factory, undefined, 60);
+    expect(again).toMatchObject({ ok: false, kind: "cooldown" });
+    expect((again as { retryAfterSeconds: number }).retryAfterSeconds).toBeGreaterThan(50);
+    // Other events are unaffected.
+    expect(await syncEvent(db, org.id, e2, factory, undefined, 60)).toMatchObject({ ok: true });
+  });
+
   it("persists multi-currency events without merging currencies", async () => {
     const { org, e1 } = await setup();
     const usd = [costs(2500, 271, 80, 0)];

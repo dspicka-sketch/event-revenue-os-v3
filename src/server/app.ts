@@ -32,6 +32,19 @@ export const PLANNED_INTEGRATIONS: ConnectionsResponse["planned"] = [
   { provider: "ticket_evolution", label: "Ticket Evolution", milestone: "M6", role: "Resale / distribution" },
 ];
 
+export const SECURITY_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "font-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 export interface AppOptions {
   db: Db;
   adapterFactory?: AdapterFactory;
@@ -43,6 +56,8 @@ export interface AppOptions {
    * preview). Native mobile apps do not need CORS. Empty = same-origin only.
    */
   corsOrigins?: string[];
+  /** Minimum seconds between refreshes of one show (protects vendor rate limits). Default 60. */
+  refreshCooldownSeconds?: number;
 }
 
 declare module "fastify" {
@@ -125,6 +140,21 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     // Bearer tokens only (no cookies), so credentials mode is not needed.
     await app.register(fastifyCors, { origin: opts.corsOrigins, methods: ["GET", "POST", "PUT", "DELETE"], allowedHeaders: ["Authorization", "Content-Type"] });
   }
+
+  // ---- security headers. The web client is a static bundle served from this
+  // origin: no inline scripts, no third-party hosts. HSTS belongs on the TLS
+  // terminator in front of the server (not set here because this server speaks HTTP).
+  app.addHook("onSend", async (req, reply, payload) => {
+    reply.header("Content-Security-Policy", SECURITY_CSP);
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Referrer-Policy", "no-referrer");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Cross-Origin-Opener-Policy", "same-origin");
+    reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+    // Tenant revenue data must not be cached by browsers or intermediaries.
+    if (req.url.startsWith("/api/")) reply.header("Cache-Control", "no-store");
+    return payload;
+  });
 
   // ---- authentication (same bearer sessions for web and mobile)
   app.addHook("onRequest", async (req, reply) => {
@@ -217,9 +247,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (!org) return;
     const { eventId } = req.params;
     if (!UUID.test(eventId)) return reply.code(404).send({ error: "not_found" });
-    const out = await syncEvent(db, org.id, eventId, factory);
+    const out = await syncEvent(db, org.id, eventId, factory, now, opts.refreshCooldownSeconds ?? 60);
     if (out.ok) return { ok: true, runId: out.runId } satisfies RefreshResponse;
-    const code = out.kind === "not_found" && !out.runId ? 404 : out.kind === "busy" ? 409 : 502;
+    if (out.kind === "cooldown" && out.retryAfterSeconds) reply.header("Retry-After", String(out.retryAfterSeconds));
+    const code = out.kind === "not_found" && !out.runId ? 404 : out.kind === "busy" ? 409 : out.kind === "cooldown" ? 429 : 502;
     return reply.code(code).send({ ok: false, runId: out.runId, kind: out.kind, message: out.message, action: actionFor(out.kind) } satisfies RefreshResponse);
   });
 

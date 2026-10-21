@@ -116,6 +116,14 @@ describe("computeEventRevenue", () => {
     expect(r.currencies[0]!.reconciliation[0]).toMatchObject({ difference: 149, explained: false });
   });
 
+  it("flags orders without a transaction time instead of silently dropping them from pace", () => {
+    const lc = [costs(2500, 271, 80, 0)];
+    const r = run([order("o1", "e1", lc, { created: null })], attendees("o1", "e1", lc));
+    expect(r.currencies[0]!.measures.grossSales.minor).toBe(2851);
+    expect(r.currencies[0]!.dailySales).toEqual([]);
+    expect(r.exceptions.find((e) => e.code === "missing_transaction_time")?.orderSourceId).toBe("o1");
+  });
+
   it("computes the last-7-days window by transaction time", () => {
     const lc = [costs(2500, 271, 80, 0)];
     const r = run(

@@ -18,7 +18,8 @@ export interface RevenueException {
     | "line_currency_mismatch"
     | "orphan_line"
     | "missing_from_source"
-    | "refund_fee_treatment_unverified";
+    | "refund_fee_treatment_unverified"
+    | "missing_transaction_time";
   severity: ExceptionSeverity;
   message: string;
   orderSourceId?: string;
@@ -301,7 +302,9 @@ export function computeEventRevenue(
       }
       proceeds.add(orderProceeds);
 
-      if (o.createdAt) {
+      if (!o.createdAt) {
+        exceptions.push({ code: "missing_transaction_time", severity: "info", orderSourceId: o.sourceId, message: "Order has no transaction time from the source; it counts in totals but not in daily pace or last-7-day figures." });
+      } else {
         const date = localDate(o.createdAt, tz);
         const d = daily.get(date) ?? { date, paidTickets: 0, grossAfterRefundsMinor: 0 };
         for (const l of ls) {

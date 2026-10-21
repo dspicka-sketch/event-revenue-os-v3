@@ -37,6 +37,13 @@ const ACTIONS: Record<ProviderErrorKind, string> = {
   limit_exceeded: "The read exceeded RevOS's safety bounds for one sync. Raise the bound deliberately if the event is that large.",
 };
 
+const OTHER_ACTIONS: Record<string, string> = {
+  busy: "A refresh for this show is already running. Wait for it to finish.",
+  cooldown: "Refreshes are spaced out to protect the provider's rate limit. Try again shortly.",
+  abandoned: "The previous refresh did not finish (server restart or crash). Refresh again.",
+  internal: "Unexpected error while saving the data. Check server logs; last good data is retained.",
+};
+
 export function actionFor(kind: string): string {
-  return ACTIONS[kind as ProviderErrorKind] ?? "Unexpected error. Check server logs.";
+  return ACTIONS[kind as ProviderErrorKind] ?? OTHER_ACTIONS[kind] ?? "Unexpected error. Check server logs.";
 }

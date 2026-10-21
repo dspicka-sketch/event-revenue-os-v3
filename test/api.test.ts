@@ -46,6 +46,7 @@ describeDb("HTTP API", () => {
 
     app = await buildApp({
       db,
+      refreshCooldownSeconds: 0,
       now: () => new Date("2026-10-20T19:00:00Z"),
       adapterFactory: (c) => {
         const t = createFixtureTransport({ events: pilotFixture(), failFor: () => failure });
@@ -166,6 +167,30 @@ describeDb("HTTP API", () => {
     const none = await app.inject({ url: "/api/health", headers: { origin: "http://localhost:8081" } });
     expect(none.headers["access-control-allow-origin"]).toBeUndefined();
     await cors.close();
+  });
+
+  it("rate-limits repeated refreshes of one show with 429 and Retry-After", async () => {
+    const limited = await buildApp({ db, refreshCooldownSeconds: 60, adapterFactory: (c) => {
+      const t = createFixtureTransport({ events: pilotFixture() });
+      return new EventbriteAdapter({ token: "t", organizationId: c.provider_account_id, fetchImpl: t.fetch, sleep: async () => {} });
+    } });
+    const url = `/api/orgs/${orgId}/events/${eventId}/refresh`;
+    await limited.inject({ method: "POST", url, headers: admin }); // succeeds, or is already cooling down
+    const r = await limited.inject({ method: "POST", url, headers: admin });
+    expect(r.statusCode).toBe(429);
+    expect(Number(r.headers["retry-after"])).toBeGreaterThan(0);
+    expect(r.json()).toMatchObject({ kind: "cooldown" });
+    await limited.close();
+  });
+
+  it("sends security headers and forbids caching API data", async () => {
+    const r = await app.inject({ url: "/api/me", headers: viewer });
+    expect(r.headers["content-security-policy"]).toContain("script-src 'self'");
+    expect(r.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+    expect(r.headers["x-content-type-options"]).toBe("nosniff");
+    expect(r.headers["cache-control"]).toBe("no-store");
+    const unauth = await app.inject({ url: "/api/me" });
+    expect(unauth.headers["cache-control"]).toBe("no-store");
   });
 
   it("returns 404 for malformed IDs", async () => {
