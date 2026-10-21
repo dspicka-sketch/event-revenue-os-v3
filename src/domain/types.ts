@@ -81,3 +81,15 @@ export type ProceedsPolicy =
   | "unverified"
   /** Proceeds = buyer gross − platform fee − payment fee − tax. */
   | "gross_minus_fees_and_tax";
+
+/** An email campaign and its links to ticketing events (marketing source, not a sale). */
+export interface NormalizedCampaign {
+  sourceId: string;
+  title: string;
+  /** Send time (UTC ISO); null if not sent. */
+  sentAt: string | null;
+  emailsSent: number | null;
+  uniqueOpens: number | null;
+  /** One entry per (event, tracking code) the campaign linked to. */
+  eventLinks: { provider: "eventbrite"; sourceEventId: string; trackingCode: string | null; uniqueClicks: number | null; totalClicks: number | null }[];
+}
