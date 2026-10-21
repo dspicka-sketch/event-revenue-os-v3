@@ -205,3 +205,14 @@ tr.unattributed th, tr.unattributed td { color: var(--muted); }
   .working-stat { align-items: flex-start; text-align: left; }
 }
 tr.group-row th { background: var(--bg); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+
+.period { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-top: 8px; }
+.period button { font: 600 0.8rem inherit; font-family: inherit; padding: 5px 12px; border: 0; background: var(--surface); color: var(--muted); }
+.period button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
+.period button:disabled { opacity: 0.5; cursor: not-allowed; }
+.channels { list-style: none; padding: 0; margin: 12px 0 4px; display: flex; flex-wrap: wrap; gap: 8px; }
+.channels li { border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; font-size: 0.85rem; }
+.channel-name { color: var(--muted); }
+.spend-note { color: var(--text); }
+.rename select { font: inherit; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.spend-form input { width: 7em; }

@@ -2,7 +2,7 @@
 // synthetic show. Never touches live organizations.
 import { createPool } from "../src/db/pool.js";
 import { migrate } from "../src/db/migrate.js";
-import { createConnection, createMappedEvent, createOrganization, setTrackingLabel, upsertTarget } from "../src/db/repo.js";
+import { createConnection, createMappedEvent, createOrganization, setMarketingSpend, setTrackingLabel, upsertTarget } from "../src/db/repo.js";
 import { createUser, findUserId, setMembership } from "../src/auth/accounts.js";
 import { generatePassword } from "../src/auth/password.js";
 import { FIXTURE_ACCOUNT_ID, pilotFixture } from "../src/providers/eventbrite/fixtures.js";
@@ -43,10 +43,13 @@ try {
         name: ev.event.name!.text!, startUtc: ev.event.start!.utc!,
       });
       for (const t of fixtureTargets[i] ?? []) await upsertTarget(db, org.id, canonicalEventId, { ...t }, userId);
+      // Example spend (fixture): paid social per night, and a TikTok push that sold nothing on night 1.
+      await setMarketingSpend(db, org.id, canonicalEventId, "fb-ads", "USD", i === 0 ? 30000 : 15000, userId);
+      if (i === 0) await setMarketingSpend(db, org.id, canonicalEventId, "tiktok-promo", "USD", 12000, userId);
       const out = await syncEvent(db, org.id, canonicalEventId);
       console.log(`Fixture event ${ev.event.id}: ${out.ok ? "synced" : `FAILED ${out.kind}: ${out.message}`}`);
     }
-    for (const [code, label, channel] of [["ig-bio", "Instagram bio link", "social"], ["fb-ads", "Facebook & Instagram ads", "paid_ads"], ["venue-site", "Venue website", "website"]] as const) {
+    for (const [code, label, channel] of [["ig-bio", "Instagram bio link", "social"], ["fb-ads", "Facebook & Instagram ads", "paid_ads"], ["venue-site", "Venue website", "website"], ["tiktok-promo", "TikTok promo", "social"]] as const) {
       await setTrackingLabel(db, org.id, code, label, userId, channel);
     }
     const mc = await createConnection(db, { organizationId: org.id, provider: "mailchimp", providerAccountId: FIXTURE_MC_ACCOUNT_ID, mode: "fixture", secretRef: null });

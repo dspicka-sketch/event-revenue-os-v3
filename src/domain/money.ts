@@ -159,3 +159,16 @@ export function formatMoneyCompact(minor: MinorUnits, currency: string, locale =
   }
   return `${negative ? "-" : ""}${symbol}${body}`;
 }
+
+/**
+ * Parse a typed amount ("300", "1,250.50") in major units into integer minor
+ * units for `currency`, without floating point. Returns null if invalid.
+ */
+export function parseMoneyInput(text: string, currency: string): MinorUnits | null {
+  const scale = currencyScale(currency);
+  const t = text.trim().replace(/[,\s]/g, "").replace(/^[$€£¥]/, "");
+  const m = t.match(scale > 0 ? new RegExp(`^(\\d{1,12})(?:\\.(\\d{1,${scale}}))?$`) : /^(\d{1,12})$/);
+  if (!m) return null;
+  const minor = Number(m[1]) * 10 ** scale + (scale > 0 ? Number((m[2] ?? "").padEnd(scale, "0")) : 0);
+  return Number.isSafeInteger(minor) ? minor : null;
+}

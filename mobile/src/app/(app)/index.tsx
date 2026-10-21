@@ -44,7 +44,7 @@ export default function Shows() {
           <Text style={{ color: t.accent, fontWeight: "600" }}>{org?.is_fixture ? "FIXTURE — " : ""}{org?.name} ⇄</Text>
         </Pressable>
       )}
-      {data?.marketing && <WhatsWorkingCard m={data.marketing} />}
+      {data?.marketing && <WhatsWorkingCard all={data.marketing} week={data.marketingLast7Days} />}
       {data && (
         <Card>
           <View style={{ flexDirection: "row", gap: 12 }}>

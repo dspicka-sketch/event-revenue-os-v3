@@ -45,11 +45,17 @@ After reviewing the demo, Daniel chose marketing effectiveness as RevOS's lead (
 - Facility fee and rebate come from the source's itemized fee list (Eventbrite `fee_components`, ASSUMED) and show as unavailable when it isn't itemized.
 - The fixture now carries a $2.00 facility fee, a $1.00 rebate and 8.75% tax per ticket.
 
+### Channels, 7-day view, spend (D16, 2026-10-21)
+- Each tracking link can carry a channel; boards and show panels show a channel split.
+- Both apps have a "Last 7 days / To date" toggle.
+- Admins can enter spend per source per show; the To date view shows cost per paid ticket, and sources with spend but no sales still appear.
+- Fixture: Facebook ads $300 / $150, plus a TikTok promo with $120 spend and no sales.
+
 ## Verification actually performed (2026-10-21)
 
 | Check | Result |
 |---|---|
-| `npm run check` (local PostgreSQL 16) | typecheck OK; **102/102 tests** passed (money 6, revenue 13, fees 6, pulse 12, marketing 8, marketing sync 4, Mailchimp 6, Eventbrite client 10, probe 4, DB sync 15, HTTP API 18); web build OK; secret/PII scan clean |
+| `npm run check` (local PostgreSQL 16) | typecheck OK; **108/108 tests** passed (money 7, revenue 13, fees 6, pulse 12, marketing 12, marketing sync 4, Mailchimp 6, Eventbrite client 10, probe 4, DB sync 15, HTTP API 19); web build OK; secret/PII scan clean |
 | Mobile `npm run typecheck` / `npm test` | OK / 6/6 passed |
 | `npx expo export --platform web` and `--platform ios` | Both bundles built (iOS Hermes bytecode, 2.7 MB), including the shared domain modules |
 | Desktop manual run (Playwright, 1280 px and 390 px) | sign-in → shows → show detail (pace tooltip) → integrations (test connection). No horizontal overflow at 390 px after fixing a hidden-header overflow bug |

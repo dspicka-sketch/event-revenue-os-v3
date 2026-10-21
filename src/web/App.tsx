@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { CurrencyRevenue, ReconciliationRow, RevenueException } from "../domain/revenue.js";
-import { currencyScale, type Measure } from "../domain/money.js";
+import { currencyScale, parseMoneyInput, type Measure } from "../domain/money.js";
+import { CHANNEL_LABELS, CHANNELS, type Channel, type MoneyByCurrency } from "../domain/marketing.js";
 import { TARGET_LABELS, type AttentionItem, type ShowCard, type TargetProgress } from "../domain/pulse.js";
 import {
   api, ApiError, getToken, setToken,
@@ -282,7 +283,7 @@ function EventList({ org, go, onAuth }: { org: Organization; go: Go; onAuth: () 
         <h1>{org.name}</h1>
         <p className="muted">Performance dates in {tz}. "Last 7 days" uses sale date. Totals are per currency and never combined.</p>
       </div>
-      {pulse.marketing && <WhatsWorking m={pulse.marketing} />}
+      {pulse.marketing && <WhatsWorking all={pulse.marketing} week={pulse.marketingLast7Days} />}
       <PulseSummary pulse={pulse} />
       {ev.events.length === 0 ? (
         <div className="card"><p>No shows are mapped for this organization yet. See Integrations.</p></div>
@@ -419,8 +420,9 @@ function EventPage({ org, eventId, go, onAuth }: { org: Organization; eventId: s
       </div>
 
       {e.marketing && (
-        <MarketingPanel m={e.marketing} tz={tz}
-          onRename={org.role === "admin" ? async (code, label) => { await api.setTrackingLabel(org.id, code, label); reload(); } : undefined} />
+        <MarketingPanel m={e.marketing} m7={e.marketingLast7Days} tz={tz} currency={card.currency ?? "USD"}
+          onEditLink={org.role === "admin" ? async (code, label, channel) => { await api.setTrackingLink(org.id, code, label, channel); reload(); } : undefined}
+          onSpend={org.role === "admin" ? async (code, currency, minor) => { await api.setSpend(org.id, eventId, code, currency, minor); reload(); } : undefined} />
       )}
 
       <SyncStatus e={e} tz={tz} />
@@ -466,10 +468,9 @@ function TargetsPanel({ org, eventId, card, onSaved, onAuth }: { org: Organizati
       if (!/^\d+$/.test(trimmed)) return setError("Enter a whole number of tickets.");
       minor = Number(trimmed);
     } else {
-      const scale = currencyScale(currency);
-      const m = trimmed.match(scale > 0 ? new RegExp(`^(\\d+)(?:\\.(\\d{1,${scale}}))?$`) : /^(\d+)$/);
-      if (!m) return setError(scale > 0 ? "Enter an amount like 18000 or 18000.50." : "Enter a whole amount.");
-      minor = Number(m[1]) * 10 ** scale + Number((m[2] ?? "").padEnd(scale, "0") || "0");
+      const parsed = parseMoneyInput(trimmed, currency);
+      if (parsed === null) return setError(currencyScale(currency) > 0 ? "Enter an amount like 18000 or 18000.50." : "Enter a whole amount.");
+      minor = parsed;
     }
     try {
       await api.setTarget(org.id, eventId, { measure, value: minor, currency: isCount ? null : currency });
@@ -792,93 +793,171 @@ function ConnectionsTable({ data, results, canTest, onTest, tz }: {
 
 // ------------------------------------------------------------------ marketing (D13)
 
-function MarketingPanel({ m, tz, onRename }: { m: MarketingSummary; tz: string; onRename?: (code: string, label: string | null) => Promise<void> }) {
-  const [editing, setEditing] = useState<string | null>(null);
+const money = (list: MoneyByCurrency[]) => list.map((g) => (g.minor === null ? `? ${g.currency}` : formatMoney(g.minor, g.currency))).join(" · ");
+
+function PeriodToggle({ value, onChange, weekDisabled }: { value: "week" | "all"; onChange: (v: "week" | "all") => void; weekDisabled?: boolean }) {
+  return (
+    <div className="period" role="group" aria-label="Period">
+      <button type="button" aria-pressed={value === "week"} disabled={weekDisabled} onClick={() => onChange("week")}>Last 7 days</button>
+      <button type="button" aria-pressed={value === "all"} onClick={() => onChange("all")}>To date</button>
+    </div>
+  );
+}
+
+function ChannelStrip({ items }: { items: { channel: Channel | "unassigned"; paidTickets: number; ticketShare: number }[] }) {
+  if (items.length === 0) return null;
+  return (
+    <ul className="channels" aria-label="Paid tickets by channel">
+      {items.map((c) => (
+        <li key={c.channel}><span className="channel-name">{CHANNEL_LABELS[c.channel]}</span> <strong>{c.ticketShare}%</strong> <span className="muted small">({c.paidTickets})</span></li>
+      ))}
+    </ul>
+  );
+}
+
+function MarketingPanel({ m, m7, tz, currency, onEditLink, onSpend }: {
+  m: MarketingSummary; m7: MarketingSummary | null; tz: string; currency: string;
+  onEditLink?: (code: string, label: string | null, channel: Channel | null) => Promise<void>;
+  onSpend?: (code: string, currency: string, minor: number | null) => Promise<void>;
+}) {
+  const [period, setPeriod] = useState<"week" | "all">("all");
+  const [editing, setEditing] = useState<{ code: string; what: "link" | "spend" } | null>(null);
   const [draft, setDraft] = useState("");
+  const [draftChannel, setDraftChannel] = useState<Channel | "">("");
   const [error, setError] = useState<string | null>(null);
-  const save = async (ev: FormEvent, code: string) => {
+  const v = period === "week" && m7 ? m7 : m;
+  const max = Math.max(1, ...v.drivers.map((d) => d.paidTickets), v.unattributed.paidTickets);
+  const sent = (iso: string | null) => (iso ? new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" }).format(new Date(iso)) : "—");
+
+  const saveLink = async (ev: FormEvent, code: string) => {
     ev.preventDefault();
     setError(null);
-    try {
-      await onRename!(code, draft.trim() || null);
-      setEditing(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+    try { await onEditLink!(code, draft.trim() || null, draftChannel || null); setEditing(null); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
-  const max = Math.max(1, ...m.drivers.map((d) => d.paidTickets), m.unattributed.paidTickets);
-  const sent = (iso: string | null) => (iso ? new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" }).format(new Date(iso)) : "—");
+  const saveSpend = async (ev: FormEvent, code: string) => {
+    ev.preventDefault();
+    setError(null);
+    const minor = draft.trim() === "" ? null : parseMoneyInput(draft, currency);
+    if (draft.trim() !== "" && minor === null) return setError(`Enter an amount in ${currency}, like 300 or 249.99.`);
+    try { await onSpend!(code, currency, minor); setEditing(null); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  };
+
   return (
     <section className="card marketing" aria-labelledby="mk-h">
       <div className="card-title-row">
         <h2 id="mk-h" className="card-title">What's driving sales</h2>
-        <span className="small muted">{m.trackedShare}% of paid tickets linked to marketing ({m.attributedTickets} of {m.paidTickets})</span>
+        <PeriodToggle value={period} onChange={setPeriod} weekDisabled={!m7} />
       </div>
       <p className="small muted">
-        Paid tickets by the tracking link each order came through. Email campaigns count only within {m.windowDays} days of sending; one source per order. Gross is after refunds, before fees.
+        {v.trackedShare}% of {v.paidTickets} paid tickets linked to marketing{period === "week" ? " · orders in the last 7 days" : " · all sales to date"}.
+        Email campaigns count only within {v.windowDays} days of sending; one source per order. Gross is after refunds, before fees.
+        {period === "week" ? " Spend and cost per ticket are shown in the To date view." : ""}
       </p>
+      <ChannelStrip items={v.byChannel} />
       <div className="table-wrap">
         <table className="data">
           <thead>
             <tr>
               <th scope="col">Source</th>
-              <th scope="col">Type</th>
+              <th scope="col">Channel</th>
               <th scope="col" className="num">Paid tickets</th>
               <th scope="col" className="share-col"><span className="sr-only">Share of tickets</span></th>
               <th scope="col" className="num">Orders</th>
               <th scope="col" className="num">Gross after refunds</th>
+              {period === "all" && <th scope="col" className="num">Spend</th>}
+              {period === "all" && <th scope="col" className="num">Cost per ticket</th>}
               <th scope="col" className="num">Orders per 100 clicks</th>
             </tr>
           </thead>
           <tbody>
-            {m.drivers.map((d) => (
-              <tr key={`${d.kind}:${d.campaign?.id ?? d.code}`}>
-                <th scope="row">
-                  {editing === d.code ? (
-                    <form className="rename" onSubmit={(ev) => save(ev, d.code)}>
-                      <label className="sr-only" htmlFor={`rn-${d.code}`}>Name for {d.code}</label>
-                      <input id={`rn-${d.code}`} value={draft} maxLength={80} onChange={(ev) => setDraft(ev.target.value)} placeholder="e.g. Instagram bio link" autoFocus />
-                      <button type="submit" className="secondary">Save</button>
-                      <button type="button" className="link" onClick={() => setEditing(null)}>Cancel</button>
-                      {error && <span className="form-error small" role="alert">{error}</span>}
-                    </form>
-                  ) : (
-                    <>
-                      {d.label}
-                      {onRename && d.kind === "tracking_link" && (
-                        <button className="link small rename-btn" onClick={() => { setEditing(d.code); setDraft(d.label === d.code ? "" : d.label); }} aria-label={`Rename ${d.code}`}>Rename</button>
+            {v.drivers.map((d) => {
+              const key = `${d.kind}:${d.campaign?.id ?? d.code}`;
+              const editingLink = editing?.code === d.code && editing.what === "link";
+              const editingSpend = editing?.code === d.code && editing.what === "spend";
+              return (
+                <tr key={key}>
+                  <th scope="row">
+                    {editingLink ? (
+                      <form className="rename" onSubmit={(ev) => saveLink(ev, d.code)}>
+                        <label className="sr-only" htmlFor={`rn-${d.code}`}>Name for {d.code}</label>
+                        <input id={`rn-${d.code}`} value={draft} maxLength={80} onChange={(ev) => setDraft(ev.target.value)} placeholder="e.g. Instagram bio link" autoFocus />
+                        <label className="sr-only" htmlFor={`ch-${d.code}`}>Channel for {d.code}</label>
+                        <select id={`ch-${d.code}`} value={draftChannel} onChange={(ev) => setDraftChannel(ev.target.value as Channel | "")}>
+                          <option value="">No channel</option>
+                          {CHANNELS.filter((c) => c !== "email").map((c) => <option key={c} value={c}>{CHANNEL_LABELS[c]}</option>)}
+                        </select>
+                        <button type="submit" className="secondary">Save</button>
+                        <button type="button" className="link" onClick={() => setEditing(null)}>Cancel</button>
+                        {error && <span className="form-error small" role="alert">{error}</span>}
+                      </form>
+                    ) : (
+                      <>
+                        {d.label}
+                        {onEditLink && d.kind === "tracking_link" && (
+                          <button className="link small rename-btn" onClick={() => { setEditing({ code: d.code, what: "link" }); setDraft(d.label === d.code ? "" : d.label); setDraftChannel(d.channel ?? ""); setError(null); }} aria-label={`Edit ${d.code}`}>Edit</button>
+                        )}
+                      </>
+                    )}
+                    <div className="small muted"><code>{d.code}</code>{d.campaign ? ` · sent ${sent(d.campaign.sentAt)} · ${d.campaign.emailsSent?.toLocaleString("en-US") ?? "?"} emails` : ""}</div>
+                  </th>
+                  <td>{d.channel ? <span className="tag">{CHANNEL_LABELS[d.channel]}</span> : <span className="tag neutral">Unassigned</span>}</td>
+                  <td className="num">{d.paidTickets}</td>
+                  <td className="share-col"><ShareBar value={d.paidTickets} max={max} label={`${d.ticketShare}%`} /></td>
+                  <td className="num">{d.orders}</td>
+                  <td className="num">{money(d.grossAfterRefunds) || "—"}</td>
+                  {period === "all" && (
+                    <td className="num">
+                      {editingSpend ? (
+                        <form className="rename spend-form" onSubmit={(ev) => saveSpend(ev, d.code)}>
+                          <label className="sr-only" htmlFor={`sp-${d.code}`}>Spend for {d.label} in {currency}</label>
+                          <input id={`sp-${d.code}`} inputMode="decimal" value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder={`${currency} amount`} autoFocus />
+                          <button type="submit" className="secondary">Save</button>
+                          <button type="button" className="link" onClick={() => setEditing(null)}>Cancel</button>
+                          {error && <span className="form-error small" role="alert">{error}</span>}
+                        </form>
+                      ) : (
+                        <>
+                          {money(d.spend) || <span className="muted">—</span>}
+                          {onSpend && (
+                            <button className="link small rename-btn" onClick={() => {
+                              const cur = d.spend.find((x) => x.currency === currency)?.minor;
+                              setEditing({ code: d.code, what: "spend" });
+                              setDraft(cur == null ? "" : String(cur / 10 ** currencyScale(currency)));
+                              setError(null);
+                            }} aria-label={`Set spend for ${d.label}`}>{d.spend.length ? "Edit" : "Add"}</button>
+                          )}
+                        </>
                       )}
-                    </>
+                    </td>
                   )}
-                  <div className="small muted"><code>{d.code}</code>{d.campaign ? ` · sent ${sent(d.campaign.sentAt)} · ${d.campaign.emailsSent?.toLocaleString("en-US") ?? "?"} emails` : ""}</div>
-                </th>
-                <td>{d.kind === "campaign" ? <span className="tag">Email · Mailchimp</span> : <span className="tag neutral">Tracking link</span>}</td>
-                <td className="num">{d.paidTickets}</td>
-                <td className="share-col"><ShareBar value={d.paidTickets} max={max} label={`${d.ticketShare}%`} /></td>
-                <td className="num">{d.orders}</td>
-                <td className="num">{d.grossAfterRefunds.map((g) => (g.minor === null ? `Unknown ${g.currency}` : formatMoney(g.minor, g.currency))).join(" · ") || "—"}</td>
-                <td className="num">{d.ordersPer100Clicks ?? "—"}</td>
-              </tr>
-            ))}
+                  {period === "all" && <td className="num">{d.costPerPaidTicket.length ? (d.costPerPaidTicket.every((x) => x.minor === null) ? "No sales" : money(d.costPerPaidTicket)) : "—"}</td>}
+                  <td className="num">{d.ordersPer100Clicks ?? "—"}</td>
+                </tr>
+              );
+            })}
             <tr className="unattributed">
-              <th scope="row">No tracking link<div className="small muted">Bought without a tracked link{m.conflictingOrders ? `, or with conflicting links (${m.conflictingOrders})` : ""}</div></th>
+              <th scope="row">No tracking link<div className="small muted">Bought without a tracked link{v.conflictingOrders ? `, or with conflicting links (${v.conflictingOrders})` : ""}</div></th>
               <td><span className="tag neutral">Unattributed</span></td>
-              <td className="num">{m.unattributed.paidTickets}</td>
-              <td className="share-col"><ShareBar value={m.unattributed.paidTickets} max={max} label={`${m.paidTickets ? Math.floor((m.unattributed.paidTickets * 100) / m.paidTickets) : 0}%`} muted /></td>
-              <td className="num">{m.unattributed.orders}</td>
+              <td className="num">{v.unattributed.paidTickets}</td>
+              <td className="share-col"><ShareBar value={v.unattributed.paidTickets} max={max} label={`${v.paidTickets ? Math.floor((v.unattributed.paidTickets * 100) / v.paidTickets) : 0}%`} muted /></td>
+              <td className="num">{v.unattributed.orders}</td>
               <td className="num">—</td>
+              {period === "all" && <td className="num">—</td>}
+              {period === "all" && <td className="num">—</td>}
               <td className="num">—</td>
             </tr>
           </tbody>
         </table>
       </div>
-      {(m.outsideWindow.length > 0 || m.campaignsWithoutOrders.length > 0) && (
+      {(v.outsideWindow.length > 0 || v.campaignsWithoutOrders.length > 0) && (
         <ul className="small mk-notes">
-          {m.outsideWindow.map((o) => (
-            <li key={o.code}>{o.paidTickets} tickets ({o.orders} orders) came through <strong>{o.title}</strong>'s link more than {m.windowDays} days after it was sent, so they are not credited to it.</li>
+          {v.outsideWindow.map((o) => (
+            <li key={o.code}>{o.paidTickets} tickets ({o.orders} orders) came through <strong>{o.title}</strong>'s link more than {v.windowDays} days after it was sent, so they are not credited to it.</li>
           ))}
-          {m.campaignsWithoutOrders.map((c) => (
-            <li key={c.id}><strong>{c.title}</strong> (sent {sent(c.sentAt)}{c.eventLinkClicks !== null ? `, ${c.eventLinkClicks} unique clicks to this show` : ""}) has no linked orders.</li>
+          {v.campaignsWithoutOrders.map((c) => (
+            <li key={c.id}><strong>{c.title}</strong> (sent {sent(c.sentAt)}{c.eventLinkClicks !== null ? `, ${c.eventLinkClicks} unique clicks to this show` : ""}) has no linked orders{period === "week" ? " in the last 7 days" : ""}.</li>
           ))}
         </ul>
       )}
@@ -895,7 +974,9 @@ function ShareBar({ value, max, label, muted }: { value: number; max: number; la
   );
 }
 
-function WhatsWorking({ m }: { m: OrgMarketing }) {
+function WhatsWorking({ all, week }: { all: OrgMarketing; week: OrgMarketing | null }) {
+  const [period, setPeriod] = useState<"week" | "all">(week && week.paidTickets > 0 ? "week" : "all");
+  const m = period === "week" && week ? week : all;
   const top = m.drivers.slice(0, 6);
   const max = Math.max(1, ...top.map((d) => d.paidTickets), m.unattributedTickets);
   return (
@@ -904,14 +985,16 @@ function WhatsWorking({ m }: { m: OrgMarketing }) {
         <div>
           <h2 id="ww-h" className="working-title">What's working</h2>
           <p className="small muted">{m.scope} · {m.showCount} show{m.showCount === 1 ? "" : "s"} · one source per order; emails count within 7 days of sending</p>
+          <PeriodToggle value={period} onChange={setPeriod} weekDisabled={!week} />
         </div>
         <div className="working-stat">
           <span className="working-big">{m.trackedShare}%</span>
           <span className="small muted">of {m.paidTickets.toLocaleString("en-US")} paid tickets linked to marketing</span>
         </div>
       </div>
+      <ChannelStrip items={m.byChannel} />
       {top.length === 0 ? (
-        <p className="muted">No sales are linked to marketing yet. Use Eventbrite tracking links in your emails, posts and ads.</p>
+        <p className="muted">No sales are linked to marketing{period === "week" ? " in the last 7 days" : " yet"}. Use Eventbrite tracking links in your emails, posts and ads.</p>
       ) : (
         <ol className="working-list">
           {top.map((d, i) => (
@@ -919,7 +1002,10 @@ function WhatsWorking({ m }: { m: OrgMarketing }) {
               <span className="working-rank">{i + 1}</span>
               <span className="working-name">
                 <strong>{d.label}</strong>
-                <span className="small muted">{d.kind === "campaign" ? "Email · Mailchimp" : "Tracking link"} · {d.shows} show{d.shows === 1 ? "" : "s"} · {d.orders} orders · {d.grossAfterRefunds.map((g) => (g.minor === null ? `? ${g.currency}` : formatMoney(g.minor, g.currency))).join(" · ")}</span>
+                <span className="small muted">
+                  {d.channel ? CHANNEL_LABELS[d.channel] : "Unassigned"}{d.kind === "campaign" ? " · Mailchimp" : ""} · {d.shows} show{d.shows === 1 ? "" : "s"} · {d.orders} orders · {money(d.grossAfterRefunds)}
+                  {d.spend.length > 0 && <> · <span className="spend-note">{money(d.spend)} spent{d.costPerPaidTicket.some((x) => x.minor !== null) ? `, ${money(d.costPerPaidTicket)} per ticket` : ", no sales"}</span></>}
+                </span>
               </span>
               <ShareBar value={d.paidTickets} max={max} label={`${d.paidTickets}`} />
               <span className="working-share">{d.ticketShare}%</span>

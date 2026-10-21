@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MeasureSum, combine, currencyScale, formatMoney, formatMoneyCompact, assertMinor } from "../src/domain/money.js";
+import { MeasureSum, combine, currencyScale, formatMoney, formatMoneyCompact, assertMinor, parseMoneyInput } from "../src/domain/money.js";
 
 describe("money", () => {
   it("knows currency scales", () => {
@@ -20,6 +20,16 @@ describe("money", () => {
     expect(formatMoneyCompact(123_456_789_00, "USD")).toBe("$123M");
     expect(formatMoneyCompact(-250000, "USD")).toBe("-$2.5K");
     expect(formatMoneyCompact(15000, "JPY")).toBe("¥15K");
+  });
+  it("parses typed amounts into minor units without floats", () => {
+    expect(parseMoneyInput("300", "USD")).toBe(30000);
+    expect(parseMoneyInput("$1,250.5", "USD")).toBe(125050);
+    expect(parseMoneyInput("0.07", "USD")).toBe(7);
+    expect(parseMoneyInput("1500", "JPY")).toBe(1500);
+    expect(parseMoneyInput("12.345", "USD")).toBeNull();
+    expect(parseMoneyInput("-5", "USD")).toBeNull();
+    expect(parseMoneyInput("abc", "USD")).toBeNull();
+    expect(parseMoneyInput("15.5", "JPY")).toBeNull();
   });
   it("rejects non-integer minor units", () => {
     expect(() => assertMinor(10.5, "x")).toThrow();

@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } 
 import { Stack, useLocalSearchParams } from "expo-router";
 import type { EventDetailResponse } from "@revos/shared/apiTypes";
 import { PaceBars } from "../../../components/PaceBars";
-import { DriverRowView, UnattributedRow } from "../../../components/Drivers";
+import { ChannelLine, DriverRowView, PeriodSwitch, UnattributedRow } from "../../../components/Drivers";
 import { AttentionRow, Card, FixtureBanner, Pill, Stat, TargetMeter, s } from "../../../components/ui";
 import { ago, formatMoney, showDate, whenLabel } from "../../../lib/format";
 import { ApiError } from "../../../lib/api";
@@ -18,6 +18,7 @@ export default function ShowScreen() {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [period, setPeriod] = useState<"week" | "all">("all");
 
   const load = useCallback(async () => {
     if (!org || !id) return;
@@ -64,7 +65,7 @@ export default function ShowScreen() {
         <Text style={{ color: t.muted, marginBottom: 12 }}>{showDate(card.performanceStartUtc, card.venueTimezone)}</Text>
 
         {data.event.marketing && (() => {
-          const m = data.event.marketing;
+          const m = period === "week" && data.event.marketingLast7Days ? data.event.marketingLast7Days : data.event.marketing;
           const max = Math.max(1, ...m.drivers.map((d) => d.paidTickets), m.unattributed.paidTickets);
           return (
             <Card>
@@ -72,6 +73,8 @@ export default function ShowScreen() {
               <Text style={{ color: t.muted, fontSize: 12, marginTop: 2 }}>
                 {m.trackedShare}% of paid tickets linked to marketing ({m.attributedTickets} of {m.paidTickets}). Emails count within {m.windowDays} days of sending.
               </Text>
+              <PeriodSwitch value={period} onChange={setPeriod} weekAvailable={Boolean(data.event.marketingLast7Days)} />
+              <ChannelLine items={m.byChannel} />
               {m.drivers.map((d) => <DriverRowView key={`${d.kind}:${d.campaign?.id ?? d.code}`} d={d} max={max} detailed />)}
               <UnattributedRow tickets={m.unattributed.paidTickets} total={m.paidTickets} max={max} />
               {m.campaignsWithoutOrders.map((c) => (
