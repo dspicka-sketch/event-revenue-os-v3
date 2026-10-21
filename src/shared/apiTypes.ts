@@ -2,11 +2,11 @@
 // mobile client. Dates are ISO-8601 strings on the wire.
 
 import type { MeasureStatus } from "../domain/money.js";
-import type { OrgPulse, ShowCard, Target, TargetMeasure } from "../domain/pulse.js";
+import type { OrgDriver, OrgMarketing, OrgPulse, ShowCard, Target, TargetMeasure } from "../domain/pulse.js";
 import type { EventRevenue, ReconciliationRow, SourceReportFigures } from "../domain/revenue.js";
 import type { DriverRow, MarketingSummary } from "../domain/marketing.js";
 
-export type { OrgPulse, ShowCard, Target, TargetMeasure, MeasureStatus, MarketingSummary, DriverRow };
+export type { OrgDriver, OrgMarketing, OrgPulse, ShowCard, Target, TargetMeasure, MeasureStatus, MarketingSummary, DriverRow };
 
 export type Role = "admin" | "viewer";
 

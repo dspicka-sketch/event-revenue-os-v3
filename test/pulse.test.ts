@@ -101,6 +101,35 @@ describe("marketing on the show card", () => {
   });
 });
 
+describe("org-level what's working", () => {
+  const show = (drivers: { code: string; campaign?: string; t: number; g: number }[], paid: number) => ({
+    windowDays: 7, salesOrders: 10, paidTickets: paid, attributedOrders: drivers.length, attributedTickets: drivers.reduce((a, d) => a + d.t, 0),
+    trackedShare: 0, outsideWindow: [], conflictingOrders: 0, campaignsWithoutOrders: [],
+    unattributed: { orders: 1, paidTickets: paid - drivers.reduce((a, d) => a + d.t, 0) },
+    drivers: drivers.map((d) => ({
+      code: d.code, label: d.campaign ?? d.code, kind: d.campaign ? ("campaign" as const) : ("tracking_link" as const),
+      campaign: d.campaign ? { id: d.campaign, source: "mailchimp" as const, title: d.campaign, sentAt: "2026-10-13T17:00:00Z", emailsSent: 1, uniqueOpens: 1, eventLinkClicks: 1 } : null,
+      orders: 1, paidTickets: d.t, grossAfterRefunds: [{ currency: "USD", minor: d.g }], ticketShare: 0, ordersPer100Clicks: null,
+    })),
+  });
+
+  it("sums each source across upcoming shows only, within currency", () => {
+    const p = buildOrgPulse([
+      input({ id: "a", marketing: show([{ code: "ig-bio", t: 10, g: 1000 }, { code: "mc-x", campaign: "Last call", t: 5, g: 500 }], 20) }),
+      input({ id: "b", performanceStartUtc: "2026-11-02T03:00:00Z", marketing: show([{ code: "ig-bio", t: 6, g: 600 }], 10) }),
+      input({ id: "past", performanceStartUtc: "2026-09-01T03:00:00Z", marketing: show([{ code: "ig-bio", t: 99, g: 9900 }], 99) }),
+    ], NOW);
+    const m = p.marketing!;
+    expect(m).toMatchObject({ showCount: 2, paidTickets: 30, attributedTickets: 21, unattributedTickets: 9, trackedShare: 70 });
+    expect(m.drivers[0]).toMatchObject({ code: "ig-bio", shows: 2, paidTickets: 16, ticketShare: 53, grossAfterRefunds: [{ currency: "USD", minor: 1600 }] });
+    expect(m.drivers[1]).toMatchObject({ label: "Last call", kind: "campaign", shows: 1, paidTickets: 5 });
+  });
+
+  it("is null without any marketing data", () => {
+    expect(buildOrgPulse([input()], NOW).marketing).toBeNull();
+  });
+});
+
 describe("buildOrgPulse", () => {
   it("orders shows soonest first and sums gross only within a currency", () => {
     const p = buildOrgPulse(

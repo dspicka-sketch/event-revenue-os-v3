@@ -2,6 +2,8 @@
 // came through. Values come from the shared domain engine via the API.
 import { Text, View } from "react-native";
 import type { DriverRow } from "@revos/domain/marketing";
+import type { OrgMarketing } from "@revos/domain/pulse";
+import { Card } from "./ui";
 import { formatMoneyCompact } from "@revos/domain/money";
 import { useTheme } from "../lib/theme";
 
@@ -46,5 +48,44 @@ export function UnattributedRow({ tickets, total, max }: { tickets: number; tota
       <Bar value={tickets} max={max} muted />
       <Text style={{ color: t.muted, fontSize: 12, marginTop: 2 }}>{total ? Math.floor((tickets * 100) / total) : 0}% of tickets · unattributed</Text>
     </View>
+  );
+}
+
+/** Home-screen board: top sources across upcoming shows. */
+export function WhatsWorkingCard({ m }: { m: OrgMarketing }) {
+  const t = useTheme();
+  const top = m.drivers.slice(0, 4);
+  const max = Math.max(1, ...top.map((d) => d.paidTickets), m.unattributedTickets);
+  return (
+    <Card>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: t.text, fontSize: 20, fontWeight: "800" }}>What's working</Text>
+          <Text style={{ color: t.muted, fontSize: 12 }}>{m.scope}</Text>
+        </View>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={{ color: t.text, fontSize: 24, fontWeight: "800", fontVariant: ["tabular-nums"] }}>{m.trackedShare}%</Text>
+          <Text style={{ color: t.muted, fontSize: 11 }}>of tickets tracked</Text>
+        </View>
+      </View>
+      {top.length === 0 ? (
+        <Text style={{ color: t.muted, marginTop: 10 }}>No sales linked to marketing yet. Use Eventbrite tracking links in emails, posts and ads.</Text>
+      ) : (
+        top.map((d, i) => (
+          <View key={d.key} style={{ marginTop: 10 }} accessible
+            accessibilityLabel={`${i + 1}. ${d.label}: ${d.paidTickets} paid tickets, ${d.ticketShare} percent, across ${d.shows} shows`}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
+              <Text style={{ color: t.text, fontWeight: "600", flex: 1 }} numberOfLines={1}>{i + 1}. {d.label}</Text>
+              <Text style={{ color: t.text, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{d.paidTickets}</Text>
+            </View>
+            <Bar value={d.paidTickets} max={max} />
+            <Text style={{ color: t.muted, fontSize: 12, marginTop: 2 }}>
+              {d.kind === "campaign" ? "Email" : "Tracking link"} · {d.ticketShare}% of tickets · {d.shows} show{d.shows === 1 ? "" : "s"}
+            </Text>
+          </View>
+        ))
+      )}
+      <UnattributedRow tickets={m.unattributedTickets} total={m.paidTickets} max={max} />
+    </Card>
   );
 }

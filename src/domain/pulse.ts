@@ -4,7 +4,7 @@
 
 import { addMinor, currencyScale, type Measure, type MeasureStatus, type MinorUnits } from "./money.js";
 import { localDate, type DailySales, type EventRevenue, type ReconciliationRow } from "./revenue.js";
-import type { DriverRow, MarketingSummary } from "./marketing.js";
+import type { DriverRow, MarketingSummary, MoneyByCurrency } from "./marketing.js";
 
 export type TargetMeasure = "paidTickets" | "grossAfterRefunds" | "organizerProceeds";
 
@@ -299,7 +299,84 @@ export interface OrgPulse {
     /** Upcoming (incl. today) shows' gross after refunds, per currency. */
     upcomingGrossByCurrency: { currency: string; minor: MinorUnits | null; status: MeasureStatus }[];
   };
+  /** "What's working" across upcoming shows (D13); null when no show has sales data. */
+  marketing: OrgMarketing | null;
   shows: ShowCard[];
+}
+
+export interface OrgDriver {
+  key: string;
+  code: string;
+  label: string;
+  kind: DriverRow["kind"];
+  campaignSentAt: string | null;
+  /** Upcoming shows this source sold tickets for. */
+  shows: number;
+  orders: number;
+  paidTickets: number;
+  grossAfterRefunds: MoneyByCurrency[];
+  /** Whole percent of all paid tickets across these shows. */
+  ticketShare: number;
+}
+
+export interface OrgMarketing {
+  /** Which shows and sales are included. */
+  scope: string;
+  showCount: number;
+  paidTickets: number;
+  attributedTickets: number;
+  unattributedTickets: number;
+  trackedShare: number;
+  /** All attributed sources, most paid tickets first. */
+  drivers: OrgDriver[];
+}
+
+/**
+ * Combine per-show attribution across upcoming shows. Each order was already
+ * attributed at most once per show, so summing per source never double counts.
+ * Money is summed only within a currency.
+ */
+export function aggregateMarketing(summaries: MarketingSummary[]): OrgMarketing | null {
+  if (summaries.length === 0) return null;
+  const acc = new Map<string, OrgDriver & { money: Map<string, number | null> }>();
+  let paid = 0;
+  let attributed = 0;
+  let unattributed = 0;
+  for (const m of summaries) {
+    paid += m.paidTickets;
+    attributed += m.attributedTickets;
+    unattributed += m.unattributed.paidTickets;
+    for (const d of m.drivers) {
+      const key = d.campaign ? `campaign:${d.campaign.id}` : `link:${d.code}`;
+      let a = acc.get(key);
+      if (!a) {
+        a = { key, code: d.code, label: d.label, kind: d.kind, campaignSentAt: d.campaign?.sentAt ?? null, shows: 0, orders: 0, paidTickets: 0, grossAfterRefunds: [], ticketShare: 0, money: new Map() };
+        acc.set(key, a);
+      }
+      a.shows++;
+      a.orders += d.orders;
+      a.paidTickets += d.paidTickets;
+      for (const g of d.grossAfterRefunds) {
+        const prev = a.money.has(g.currency) ? a.money.get(g.currency)! : 0;
+        a.money.set(g.currency, prev === null || g.minor === null ? null : addMinor(prev, g.minor));
+      }
+    }
+  }
+  const drivers = [...acc.values()].map(({ money, ...d }) => ({
+    ...d,
+    grossAfterRefunds: [...money.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([currency, minor]) => ({ currency, minor })),
+    ticketShare: paid > 0 ? Math.floor((d.paidTickets * 100) / paid) : 0,
+  }));
+  drivers.sort((x, y) => y.paidTickets - x.paidTickets || y.orders - x.orders || x.label.localeCompare(y.label));
+  return {
+    scope: "Upcoming shows · all sales to date",
+    showCount: summaries.length,
+    paidTickets: paid,
+    attributedTickets: attributed,
+    unattributedTickets: unattributed,
+    trackedShare: paid > 0 ? Math.floor((attributed * 100) / paid) : 0,
+    drivers,
+  };
 }
 
 /** Sort: today, upcoming soonest first, unscheduled, then past most recent first. */
@@ -325,6 +402,11 @@ export function buildOrgPulse(inputs: ShowInput[], now: Date): OrgPulse {
       paidTicketsLast7Days: cards.reduce((a, c) => a + (c.pace?.last7DaysPaidTickets ?? 0), 0),
       upcomingGrossByCurrency: [...gross.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, v]) => ({ currency, ...v })),
     },
+    marketing: aggregateMarketing(
+      inputs
+        .filter((i) => i.marketing && cards.some((c) => c.id === i.id && (c.phase === "upcoming" || c.phase === "today")))
+        .map((i) => i.marketing!),
+    ),
     shows: cards,
   };
 }

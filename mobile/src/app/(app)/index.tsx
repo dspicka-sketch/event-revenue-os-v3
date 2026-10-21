@@ -3,6 +3,7 @@ import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { Stack, router } from "expo-router";
 import type { PulseResponse } from "@revos/shared/apiTypes";
 import { ShowCardView } from "../../components/ShowCardView";
+import { WhatsWorkingCard } from "../../components/Drivers";
 import { Card, FixtureBanner, Stat } from "../../components/ui";
 import { formatMoneyCompact } from "../../lib/format";
 import { useSession } from "../../lib/session";
@@ -43,6 +44,7 @@ export default function Shows() {
           <Text style={{ color: t.accent, fontWeight: "600" }}>{org?.is_fixture ? "FIXTURE — " : ""}{org?.name} ⇄</Text>
         </Pressable>
       )}
+      {data?.marketing && <WhatsWorkingCard m={data.marketing} />}
       {data && (
         <Card>
           <View style={{ flexDirection: "row", gap: 12 }}>

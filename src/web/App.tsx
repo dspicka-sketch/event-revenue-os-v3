@@ -4,7 +4,7 @@ import { currencyScale, type Measure } from "../domain/money.js";
 import { TARGET_LABELS, type AttentionItem, type ShowCard, type TargetProgress } from "../domain/pulse.js";
 import {
   api, ApiError, getToken, setToken,
-  type ConnectionsResponse, type EventDetailResponse, type MarketingSummary, type EventDto, type MeResponse, type Organization, type PulseResponse, type TargetMeasure,
+  type ConnectionsResponse, type EventDetailResponse, type MarketingSummary, type OrgMarketing, type EventDto, type MeResponse, type Organization, type PulseResponse, type TargetMeasure,
 } from "./api.js";
 import { fmtDateTime, fmtMeasure, fmtRelative, formatMoney } from "./format.js";
 import { PaceChart } from "./PaceChart.js";
@@ -282,6 +282,7 @@ function EventList({ org, go, onAuth }: { org: Organization; go: Go; onAuth: () 
         <h1>{org.name}</h1>
         <p className="muted">Performance dates in {tz}. "Last 7 days" uses sale date. Totals are per currency and never combined.</p>
       </div>
+      {pulse.marketing && <WhatsWorking m={pulse.marketing} />}
       <PulseSummary pulse={pulse} />
       {ev.events.length === 0 ? (
         <div className="card"><p>No shows are mapped for this organization yet. See Integrations.</p></div>
@@ -292,11 +293,11 @@ function EventList({ org, go, onAuth }: { org: Organization; go: Go; onAuth: () 
             <thead>
               <tr>
                 <th scope="col">Show / performance</th>
+                <th scope="col">Top driver</th>
                 <th scope="col">Performance date</th>
                 <th scope="col" className="num">Net paid tickets</th>
                 <th scope="col" className="num">Gross after refunds</th>
                 <th scope="col" className="num">Organizer proceeds</th>
-                <th scope="col">Top driver</th>
                 <th scope="col">Target</th>
                 <th scope="col" className="num">Last 7 days (sale date)</th>
                 <th scope="col">Attention</th>
@@ -340,8 +341,9 @@ function eventRows(e: EventDto, card: ShowCard | undefined, tz: string, go: Go, 
     return [
       <tr key={e.id}>
         <th scope="row">{link}</th>
+        <td>{driver}</td>
         <td>{fmtDateTime(e.performanceStartUtc, tz)}</td>
-        <td colSpan={6} className="muted">No data yet — open the show and use Refresh.</td>
+        <td colSpan={5} className="muted">No data yet — open the show and use Refresh.</td>
         <td>{attention}</td>
         <td>{fresh}</td>
       </tr>,
@@ -350,11 +352,11 @@ function eventRows(e: EventDto, card: ShowCard | undefined, tz: string, go: Go, 
   return currencies.map((c, i) => (
     <tr key={`${e.id}-${c.currency}`}>
       <th scope="row">{i === 0 ? link : <span className="muted">↳ {c.currency}</span>}</th>
+      <td>{i === 0 ? driver : ""}</td>
       <td>{i === 0 ? fmtDateTime(e.performanceStartUtc, tz) : ""}</td>
       <td className="num">{c.tickets.paid}{c.tickets.partial ? "+" : ""}</td>
       <td className="num">{fmtMeasure(c.measures.grossAfterRefunds, c.currency)} <MeasureStatusTag m={c.measures.grossAfterRefunds} /></td>
       <td className="num">{fmtMeasure(c.measures.organizerProceeds, c.currency)} <MeasureStatusTag m={c.measures.organizerProceeds} /></td>
-      <td>{i === 0 ? driver : ""}</td>
       <td>{i === 0 ? target : ""}</td>
       <td className="num">{i === 0 && card?.pace ? card.pace.last7DaysPaidTickets : ""}</td>
       <td>{i === 0 ? attention : ""}</td>
@@ -869,5 +871,47 @@ function ShareBar({ value, max, label, muted }: { value: number; max: number; la
       <span className="share-track"><span className={muted ? "share-fill muted" : "share-fill"} style={{ width: `${(value / max) * 100}%` }} /></span>
       <span className="share-label">{label}</span>
     </span>
+  );
+}
+
+function WhatsWorking({ m }: { m: OrgMarketing }) {
+  const top = m.drivers.slice(0, 6);
+  const max = Math.max(1, ...top.map((d) => d.paidTickets), m.unattributedTickets);
+  return (
+    <section className="card working" aria-labelledby="ww-h">
+      <div className="working-head">
+        <div>
+          <h2 id="ww-h" className="working-title">What's working</h2>
+          <p className="small muted">{m.scope} · {m.showCount} show{m.showCount === 1 ? "" : "s"} · one source per order; emails count within 7 days of sending</p>
+        </div>
+        <div className="working-stat">
+          <span className="working-big">{m.trackedShare}%</span>
+          <span className="small muted">of {m.paidTickets.toLocaleString("en-US")} paid tickets linked to marketing</span>
+        </div>
+      </div>
+      {top.length === 0 ? (
+        <p className="muted">No sales are linked to marketing yet. Use Eventbrite tracking links in your emails, posts and ads.</p>
+      ) : (
+        <ol className="working-list">
+          {top.map((d, i) => (
+            <li key={d.key}>
+              <span className="working-rank">{i + 1}</span>
+              <span className="working-name">
+                <strong>{d.label}</strong>
+                <span className="small muted">{d.kind === "campaign" ? "Email · Mailchimp" : "Tracking link"} · {d.shows} show{d.shows === 1 ? "" : "s"} · {d.orders} orders · {d.grossAfterRefunds.map((g) => (g.minor === null ? `? ${g.currency}` : formatMoney(g.minor, g.currency))).join(" · ")}</span>
+              </span>
+              <ShareBar value={d.paidTickets} max={max} label={`${d.paidTickets}`} />
+              <span className="working-share">{d.ticketShare}%</span>
+            </li>
+          ))}
+          <li className="unattributed">
+            <span className="working-rank">–</span>
+            <span className="working-name"><strong>No tracking link</strong><span className="small muted">Sales with nothing to attribute them to</span></span>
+            <ShareBar value={m.unattributedTickets} max={max} label={`${m.unattributedTickets}`} muted />
+            <span className="working-share">{m.paidTickets ? Math.floor((m.unattributedTickets * 100) / m.paidTickets) : 0}%</span>
+          </li>
+        </ol>
+      )}
+    </section>
   );
 }

@@ -184,3 +184,23 @@ tr.unattributed th, tr.unattributed td { color: var(--muted); }
 .rename { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .rename input { font: inherit; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); min-width: 0; width: 14em; max-width: 100%; }
 .rename-btn { margin-left: 8px; font-weight: 400; }
+
+/* --- What's working board (D13) --- */
+.working { border-color: var(--accent); margin-bottom: 16px; }
+.working-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.working-title { margin: 0; font-size: 1.35rem; }
+.working-head p { margin: 4px 0 0; }
+.working-stat { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.working-big { font-size: 2rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.working-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
+.working-list li { display: grid; grid-template-columns: 1.5em minmax(0, 1.4fr) minmax(120px, 1fr) 3.5em; gap: 12px; align-items: center; }
+.working-list li.unattributed { color: var(--muted); border-top: 1px solid var(--border); padding-top: 10px; }
+.working-rank { color: var(--muted); font-variant-numeric: tabular-nums; }
+.working-name { display: flex; flex-direction: column; min-width: 0; }
+.working-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.working-share { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+@media (max-width: 640px) {
+  .working-list li { grid-template-columns: 1.2em minmax(0, 1fr) 3em; }
+  .working-list li .share { grid-column: 2 / 4; }
+  .working-stat { align-items: flex-start; text-align: left; }
+}
