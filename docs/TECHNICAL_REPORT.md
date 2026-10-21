@@ -4,7 +4,7 @@
 **Prepared by:** Claude Code (implementation agent)
 **Date:** 2026-10-21
 **Branch:** `claude/revos-implementation-lqwgz7` in `dspicka-sketch/event-revenue-os-v3`, 10 implementation commits, HEAD `fc2b86d` before this report's commit
-**Push state:** **not pushed**. GitHub rejects writes from Claude's integration (git: 403; API: "Resource not accessible by integration"). The code exists only in the build container and in a git bundle handed to Daniel.
+**Push state:** pushed to GitHub on 2026-10-21 after write access was granted.
 
 This report states what exists, how it works, what was verified and how, and what is assumed or blocked. Anything not listed as verified should be treated as unverified.
 
@@ -228,7 +228,7 @@ Everything else (pagination field names, status values, money object semantics, 
 
 ## 11. Next actions
 
-1. **Daniel: fix GitHub write access.** The Claude GitHub App needs **Contents: read & write** on `event-revenue-os-v3`. Reading works now; writing returns 403. Then Claude pushes the branch. Until then, the attached `revos.bundle` contains the full history (`git clone revos.bundle revos`).
+1. ~~Fix GitHub write access~~ Done 2026-10-21; branch pushed.
 2. **Daniel:** run the live Eventbrite read and reconcile against Eventbrite's sales report (README → Live setup), or allow `www.eventbriteapi.com` in the cloud environment and add the token as a secret.
 3. **Daniel:** open the mobile app on a phone via Expo Go (`mobile/README.md`) and report anything that looks wrong.
 4. **Claude, after the live read:** resolve risks 1–4 from real payloads, update `docs/integrations.md` evidence levels, then add a refresh rate limit and security headers (risks 6 and 8) before any hosting.

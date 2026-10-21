@@ -40,7 +40,6 @@ Not verified: the app on a physical iPhone or Android phone, or in a simulator. 
 
 - **Live Eventbrite read:** no credentials were supplied, and this cloud environment's network policy denies `www.eventbriteapi.com` / `www.eventbrite.com`. Every ASSUMED/SECONDHAND item in `docs/integrations.md` is still unverified, and live organizer proceeds stay Unavailable by design.
 - **Expo docs:** `docs.expo.dev` is also denied here. Mobile APIs were checked against the installed package type definitions (tsc) and real bundle exports instead.
-- **Push to GitHub:** the remote rejects pushes (403: Claude's GitHub app has no write access to `dspicka-sketch/event-revenue-os-v3`). All commits are local to this session's container.
 
 ## Unresolved gaps
 
@@ -51,6 +50,5 @@ Not verified: the app on a physical iPhone or Android phone, or in a simulator. 
 
 ## Next actions for Daniel
 
-1. **Fix GitHub access** so this work can be pushed: reconnect GitHub at https://claude.ai/connect-github and install the Claude GitHub App on the repository.
-2. **Run the live Eventbrite read** on your own machine (README → Live setup), or allow `www.eventbriteapi.com` in this environment's network settings and add the token as an environment secret.
-3. **Try the mobile app** on your phone: `HOST=0.0.0.0 npm start` at the repo root, then `cd mobile && npx expo start` and open it in Expo Go.
+1. **Run the live Eventbrite read** on your own machine (README → Live setup), or allow `www.eventbriteapi.com` in this environment's network settings and add the token as an environment secret.
+2. **Try the mobile app** on your phone: `HOST=0.0.0.0 npm start` at the repo root, then `cd mobile && npx expo start` and open it in Expo Go.
