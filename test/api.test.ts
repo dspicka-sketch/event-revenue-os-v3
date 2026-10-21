@@ -112,6 +112,26 @@ describeDb("HTTP API", () => {
     expect(test.json()).toMatchObject({ ok: true });
   });
 
+  it("lets admins set a link's channel and a show's spend, giving cost per ticket", async () => {
+    const link = `/api/orgs/${orgId}/tracking-links/fb-ads`;
+    expect((await app.inject({ method: "PUT", url: link, headers: admin, payload: { label: "FB ads", channel: "billboards" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url: link, headers: admin, payload: { label: "FB ads", channel: "paid_ads" } })).statusCode).toBe(200);
+    const spend = `/api/orgs/${orgId}/events/${eventId}/marketing-spend/fb-ads`;
+    expect((await app.inject({ method: "PUT", url: spend, headers: viewer, payload: { amountMinor: 30000, currency: "USD" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PUT", url: spend, headers: admin, payload: { amountMinor: 12.5, currency: "USD" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url: spend, headers: admin, payload: { amountMinor: 30000, currency: "USD" } })).statusCode).toBe(200);
+    const d = (await app.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: viewer })).json() as EventDetailResponse;
+    const fb = d.event.marketing!.drivers.find((x) => x.code === "fb-ads")!;
+    expect(fb).toMatchObject({ label: "FB ads", channel: "paid_ads", spend: [{ currency: "USD", minor: 30000 }] });
+    expect(fb.costPerPaidTicket[0]!.minor).toBe(Math.floor((30000 * 2 + fb.paidTickets) / (fb.paidTickets * 2)));
+    expect(d.event.marketingLast7Days!.since).not.toBeNull();
+    const pulse = (await app.inject({ url: `/api/orgs/${orgId}/pulse`, headers: viewer })).json() as PulseResponse;
+    expect(pulse.marketing!.byChannel.some((c) => c.channel === "paid_ads")).toBe(true);
+    expect(pulse.marketingLast7Days!.scope).toContain("last 7 days");
+    await app.inject({ method: "PUT", url: spend, headers: admin, payload: { amountMinor: null, currency: "USD" } });
+    await app.inject({ method: "PUT", url: link, headers: admin, payload: { label: null, channel: null } });
+  });
+
   it("lets admins name tracking links, used in place of the raw code", async () => {
     const url = `/api/orgs/${orgId}/tracking-links/ig-bio`;
     expect((await app.inject({ method: "PUT", url, headers: viewer, payload: { label: "Instagram bio link" } })).statusCode).toBe(403);

@@ -46,8 +46,8 @@ try {
       const out = await syncEvent(db, org.id, canonicalEventId);
       console.log(`Fixture event ${ev.event.id}: ${out.ok ? "synced" : `FAILED ${out.kind}: ${out.message}`}`);
     }
-    for (const [code, label] of [["ig-bio", "Instagram bio link"], ["fb-ads", "Facebook & Instagram ads"], ["venue-site", "Venue website"]] as const) {
-      await setTrackingLabel(db, org.id, code, label, userId);
+    for (const [code, label, channel] of [["ig-bio", "Instagram bio link", "social"], ["fb-ads", "Facebook & Instagram ads", "paid_ads"], ["venue-site", "Venue website", "website"]] as const) {
+      await setTrackingLabel(db, org.id, code, label, userId, channel);
     }
     const mc = await createConnection(db, { organizationId: org.id, provider: "mailchimp", providerAccountId: FIXTURE_MC_ACCOUNT_ID, mode: "fixture", secretRef: null });
     const mout = await syncMarketingConnection(db, org.id, mc.id);

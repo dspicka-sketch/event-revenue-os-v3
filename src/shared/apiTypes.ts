@@ -53,8 +53,10 @@ export interface EventDto {
   sourceReport: SourceReportFigures | null;
   reportComparison: ReconciliationRow[] | null;
   targets: Target[];
-  /** "What's driving sales" (D13); null until the show has sales data. */
+  /** "What's driving sales" (D13), all sales to date; null until the show has sales data. */
   marketing: MarketingSummary | null;
+  /** The same, counting only orders placed in the last 7 days (no spend in this view). */
+  marketingLast7Days: MarketingSummary | null;
 }
 
 export interface EventsResponse {

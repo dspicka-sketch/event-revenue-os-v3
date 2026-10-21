@@ -31,6 +31,19 @@ export interface CampaignRef {
   eventLinkClicks: number | null;
 }
 
+/** Marketing channels a tracking link can belong to. Email campaigns are always "email". */
+export const CHANNELS = ["email", "social", "paid_ads", "website", "partner", "other"] as const;
+export type Channel = (typeof CHANNELS)[number];
+export const CHANNEL_LABELS: Record<Channel | "unassigned", string> = {
+  email: "Email", social: "Social", paid_ads: "Paid ads", website: "Website", partner: "Partner", other: "Other", unassigned: "Unassigned",
+};
+
+/** What an admin has said about a tracking code. */
+export interface LinkInfo {
+  label?: string | null;
+  channel?: Channel | null;
+}
+
 export interface MoneyByCurrency {
   currency: string;
   /** null when any contributing amount is unknown. */
@@ -49,6 +62,11 @@ export interface DriverRow {
   ticketShare: number;
   /** Linked orders per 100 unique clicks on this campaign's event links. */
   ordersPer100Clicks: number | null;
+  channel: Channel | null;
+  /** Spend entered for this source on this show (empty when none, or in a time-windowed view). */
+  spend: MoneyByCurrency[];
+  /** Spend ÷ attributed paid tickets, per currency, rounded to the minor unit. */
+  costPerPaidTicket: MoneyByCurrency[];
 }
 
 export interface MarketingSummary {
@@ -66,6 +84,10 @@ export interface MarketingSummary {
   unattributed: { orders: number; paidTickets: number };
   /** Campaigns linking to this show with no attributed orders yet. */
   campaignsWithoutOrders: { id: string; title: string; sentAt: string | null; eventLinkClicks: number | null }[];
+  /** Attributed paid tickets by channel (sources with no channel assigned are "unassigned"). */
+  byChannel: { channel: Channel | "unassigned"; orders: number; paidTickets: number; ticketShare: number }[];
+  /** Orders placed on or after this instant only; null = all sales to date. */
+  since: string | null;
 }
 
 const DAY = 86400_000;
@@ -82,7 +104,14 @@ export function computeMarketing(
   orders: NormalizedOrder[],
   lines: NormalizedLine[],
   campaigns: CampaignRef[],
-  opts: { windowDays?: number; labels?: Record<string, string> } = {},
+  opts: {
+    windowDays?: number;
+    links?: Record<string, LinkInfo>;
+    /** Spend per tracking code for this show (only used when `since` is not set). */
+    spend?: Record<string, MoneyByCurrency[]>;
+    /** Count only orders placed on or after this time. */
+    since?: Date;
+  } = {},
 ): MarketingSummary {
   const windowDays = opts.windowDays ?? 7;
   const linesByOrder = new Map<string, NormalizedLine[]>();
@@ -112,6 +141,7 @@ export function computeMarketing(
 
   for (const o of orders) {
     if (o.status !== "completed") continue;
+    if (opts.since && (!o.createdAt || Date.parse(o.createdAt) < opts.since.getTime())) continue;
     const ls = linesByOrder.get(o.sourceId) ?? [];
     const tickets = ls.filter(isPaidActive).reduce((a, l) => a + l.quantity, 0);
     salesOrders++;
@@ -149,10 +179,11 @@ export function computeMarketing(
       acc = {
         row: {
           code,
-          label: campaign ? campaign.title : opts.labels?.[code] ?? code,
+          label: campaign ? campaign.title : opts.links?.[code]?.label || code,
           kind: campaign ? "campaign" : "tracking_link",
           campaign: campaign ? info : null,
           orders: 0, paidTickets: 0, grossAfterRefunds: [], ticketShare: 0, ordersPer100Clicks: null,
+          channel: campaign ? "email" : opts.links?.[code]?.channel ?? null, spend: [], costPerPaidTicket: [],
         },
         money: new Map(),
       };
@@ -176,10 +207,35 @@ export function computeMarketing(
     row.ticketShare = pct(row.paidTickets, paidTickets);
     const clicks = row.campaign?.eventLinkClicks ?? null;
     row.ordersPer100Clicks = clicks && clicks > 0 ? Math.round((row.orders * 1000) / clicks) / 10 : null;
+    if (!opts.since) {
+      row.spend = opts.spend?.[row.code] ?? [];
+      row.costPerPaidTicket = costPerTicket(row.spend, row.paidTickets);
+    }
     return row;
   });
+  // A source with spend but no attributed sales still belongs on the board (0 tickets for the money).
+  if (!opts.since) {
+    for (const [code, spend] of Object.entries(opts.spend ?? {})) {
+      if (rows.some((r) => r.code === code)) continue;
+      const campaign = (campaignsByCode.get(code) ?? [])[0] ?? null;
+      const { trackingCodes: _c, ...info } = campaign ?? ({} as CampaignRef);
+      rows.push({
+        code, label: campaign ? campaign.title : opts.links?.[code]?.label || code, kind: campaign ? "campaign" : "tracking_link",
+        campaign: campaign ? info : null, orders: 0, paidTickets: 0, grossAfterRefunds: [], ticketShare: 0, ordersPer100Clicks: null,
+        channel: campaign ? "email" : opts.links?.[code]?.channel ?? null, spend, costPerPaidTicket: costPerTicket(spend, 0),
+      });
+    }
+  }
   rows.sort((a, b) => b.paidTickets - a.paidTickets || b.orders - a.orders || a.label.localeCompare(b.label));
 
+  const channels = new Map<Channel | "unassigned", { orders: number; paidTickets: number }>();
+  for (const r of rows) {
+    const k = r.channel ?? "unassigned";
+    const c = channels.get(k) ?? { orders: 0, paidTickets: 0 };
+    c.orders += r.orders;
+    c.paidTickets += r.paidTickets;
+    channels.set(k, c);
+  }
   const used = new Set(rows.filter((r) => r.campaign).map((r) => r.campaign!.id));
   return {
     windowDays,
@@ -195,5 +251,17 @@ export function computeMarketing(
     campaignsWithoutOrders: campaigns
       .filter((c) => !used.has(c.id))
       .map((c) => ({ id: c.id, title: c.title, sentAt: c.sentAt, eventLinkClicks: c.eventLinkClicks })),
+    byChannel: [...channels.entries()]
+      .map(([channel, v]) => ({ channel, ...v, ticketShare: pct(v.paidTickets, paidTickets) }))
+      .sort((a, b) => b.paidTickets - a.paidTickets),
+    since: opts.since ? opts.since.toISOString() : null,
   };
+}
+
+/** Spend per paid ticket in each currency (integer division, rounded half up). Never mixes currencies. */
+export function costPerTicket(spend: MoneyByCurrency[], paidTickets: number): MoneyByCurrency[] {
+  return spend.map((s) => ({
+    currency: s.currency,
+    minor: s.minor === null || paidTickets <= 0 ? null : Math.floor((s.minor * 2 + paidTickets) / (paidTickets * 2)),
+  }));
 }

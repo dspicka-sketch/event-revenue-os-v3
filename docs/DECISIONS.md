@@ -71,5 +71,12 @@ Daniel confirmed that the ticket buyer typically pays the platform fee, processi
 - **Source of facility fees and rebates:** organizer-defined fees, read from the source's itemized fee list and matched by name (facility / venue fee → facility fee, rebate → promoter rebate). If the source does not itemize fees, both lines are unavailable, never zero.
 - **Open point:** if an organization is a promoter that does not keep the facility fee (it goes to a third-party venue), proceeds would include money the organization does not keep. Revisit with a per-organization setting once Prism.fm deal data shows who keeps what.
 
+## D16 — Channels, a 7-day view, and entered spend for cost per ticket (2026-10-21)
+"Which marketing is working" needs more than ticket volume.
+- **Channels:** admins assign each tracking link a channel (email, social, paid ads, website, partner, other). Email campaigns are always email. Unassigned links are shown as "Unassigned", never guessed.
+- **Time window:** every marketing view is available for all sales to date and for orders placed in the last 7 days.
+- **Spend:** admins may enter what a source cost for a show (per tracking code, per currency). It is an expense input, never revenue, never added across currencies, and only shown in the to-date view, where cost per paid ticket = spend ÷ attributed paid tickets (integer minor units, rounded half up). A source with spend and no attributed sales still appears, with no cost per ticket. Ad-platform spend connectors (Meta, Google) would replace manual entry later; not on the roadmap yet.
+- Entered spend is a deviation from "read-only integrations" only in that RevOS stores a number the user typed. Nothing is written to any vendor.
+
 ## Proposed (not done)
 - A `financial_adjustments` table, deferred until a source exposes explicit refund/adjustment amounts. In M1, refunds come from order/line state.

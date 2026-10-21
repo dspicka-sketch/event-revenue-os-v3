@@ -5,7 +5,7 @@ import type pg from "pg";
 import type { EventRevenue, SourceReportFigures, ReconciliationRow } from "../domain/revenue.js";
 import { currencyScale } from "../domain/money.js";
 import type { NormalizedCampaign, NormalizedEvent, NormalizedLine, NormalizedOrder, ProceedsPolicy } from "../domain/types.js";
-import type { CampaignRef } from "../domain/marketing.js";
+import type { CampaignRef, Channel, LinkInfo, MoneyByCurrency } from "../domain/marketing.js";
 import type { Db } from "./pool.js";
 
 type Queryable = Db | pg.PoolClient;
@@ -596,19 +596,47 @@ export async function campaignRefsForEvent(db: Queryable, orgId: string, eventPr
   }));
 }
 
-export async function trackingLabels(db: Queryable, orgId: string): Promise<Record<string, string>> {
-  const rows = (await db.query<{ code: string; label: string }>("SELECT code, label FROM tracking_link_labels WHERE organization_id = $1", [orgId])).rows;
-  return Object.fromEntries(rows.map((r) => [r.code, r.label]));
+export async function trackingLinks(db: Queryable, orgId: string): Promise<Record<string, LinkInfo>> {
+  const rows = (await db.query<{ code: string; label: string | null; channel: Channel | null }>(
+    "SELECT code, label, channel FROM tracking_link_labels WHERE organization_id = $1", [orgId])).rows;
+  return Object.fromEntries(rows.map((r) => [r.code, { label: r.label, channel: r.channel }]));
 }
 
-export async function setTrackingLabel(db: Queryable, orgId: string, code: string, label: string | null, userId: string): Promise<void> {
-  if (label === null) {
+/** Set a tracking link's name and/or channel; clearing both removes the entry. */
+export async function setTrackingLink(db: Queryable, orgId: string, code: string, info: { label: string | null; channel: Channel | null }, userId: string): Promise<void> {
+  if (info.label === null && info.channel === null) {
     await db.query("DELETE FROM tracking_link_labels WHERE organization_id = $1 AND code = $2", [orgId, code]);
     return;
   }
   await db.query(
-    `INSERT INTO tracking_link_labels (organization_id, code, label, updated_by) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (organization_id, code) DO UPDATE SET label = EXCLUDED.label, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-    [orgId, code, label, userId],
+    `INSERT INTO tracking_link_labels (organization_id, code, label, channel, updated_by) VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (organization_id, code) DO UPDATE SET label = EXCLUDED.label, channel = EXCLUDED.channel, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [orgId, code, info.label, info.channel, userId],
+  );
+}
+
+/** Back-compat helper used by the fixture seed. */
+export async function setTrackingLabel(db: Queryable, orgId: string, code: string, label: string | null, userId: string, channel: Channel | null = null): Promise<void> {
+  await setTrackingLink(db, orgId, code, { label, channel }, userId);
+}
+
+export async function marketingSpendForEvent(db: Queryable, orgId: string, eventId: string): Promise<Record<string, MoneyByCurrency[]>> {
+  const rows = (await db.query<{ code: string; currency: string; amount_minor: number }>(
+    "SELECT code, trim(currency) AS currency, amount_minor FROM marketing_spend WHERE organization_id = $1 AND canonical_event_id = $2 ORDER BY currency",
+    [orgId, eventId])).rows;
+  const out: Record<string, MoneyByCurrency[]> = {};
+  for (const r of rows) (out[r.code] ??= []).push({ currency: r.currency, minor: r.amount_minor });
+  return out;
+}
+
+export async function setMarketingSpend(db: Queryable, orgId: string, eventId: string, code: string, currency: string, amountMinor: number | null, userId: string): Promise<void> {
+  if (amountMinor === null) {
+    await db.query("DELETE FROM marketing_spend WHERE organization_id = $1 AND canonical_event_id = $2 AND code = $3 AND currency = $4", [orgId, eventId, code, currency]);
+    return;
+  }
+  await db.query(
+    `INSERT INTO marketing_spend (organization_id, canonical_event_id, code, currency, amount_minor, updated_by) VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (organization_id, canonical_event_id, code, currency) DO UPDATE SET amount_minor = EXCLUDED.amount_minor, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [orgId, eventId, code, currency, amountMinor, userId],
   );
 }

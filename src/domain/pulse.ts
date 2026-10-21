@@ -4,7 +4,7 @@
 
 import { addMinor, currencyScale, type Measure, type MeasureStatus, type MinorUnits } from "./money.js";
 import { localDate, type DailySales, type EventRevenue, type ReconciliationRow } from "./revenue.js";
-import type { DriverRow, MarketingSummary, MoneyByCurrency } from "./marketing.js";
+import { costPerTicket, type Channel, type DriverRow, type MarketingSummary, type MoneyByCurrency } from "./marketing.js";
 
 export type TargetMeasure = "paidTickets" | "grossAfterRefunds" | "organizerProceeds";
 
@@ -32,8 +32,10 @@ export interface ShowInput {
   revenue: EventRevenue | null;
   reportComparison: ReconciliationRow[] | null;
   targets: Target[];
-  /** Attribution summary for this show (D13); null when no sales data yet. */
+  /** Attribution summary for this show (D13), all sales to date; null when no sales data yet. */
   marketing: MarketingSummary | null;
+  /** The same for orders placed in the last 7 days. */
+  marketingLast7Days?: MarketingSummary | null;
 }
 
 export type AttentionSeverity = "error" | "warning" | "info";
@@ -299,8 +301,10 @@ export interface OrgPulse {
     /** Upcoming (incl. today) shows' gross after refunds, per currency. */
     upcomingGrossByCurrency: { currency: string; minor: MinorUnits | null; status: MeasureStatus }[];
   };
-  /** "What's working" across upcoming shows (D13); null when no show has sales data. */
+  /** "What's working" across upcoming shows (D13), all sales to date; null when no show has sales data. */
   marketing: OrgMarketing | null;
+  /** The same for orders placed in the last 7 days. */
+  marketingLast7Days: OrgMarketing | null;
   shows: ShowCard[];
 }
 
@@ -317,6 +321,10 @@ export interface OrgDriver {
   grossAfterRefunds: MoneyByCurrency[];
   /** Whole percent of all paid tickets across these shows. */
   ticketShare: number;
+  channel: Channel | null;
+  /** Spend summed across shows, per currency (empty in time-windowed views). */
+  spend: MoneyByCurrency[];
+  costPerPaidTicket: MoneyByCurrency[];
 }
 
 export interface OrgMarketing {
@@ -329,6 +337,7 @@ export interface OrgMarketing {
   trackedShare: number;
   /** All attributed sources, most paid tickets first. */
   drivers: OrgDriver[];
+  byChannel: { channel: Channel | "unassigned"; orders: number; paidTickets: number; ticketShare: number }[];
 }
 
 /**
@@ -336,9 +345,9 @@ export interface OrgMarketing {
  * attributed at most once per show, so summing per source never double counts.
  * Money is summed only within a currency.
  */
-export function aggregateMarketing(summaries: MarketingSummary[]): OrgMarketing | null {
+export function aggregateMarketing(summaries: MarketingSummary[], scope = "Upcoming shows · all sales to date"): OrgMarketing | null {
   if (summaries.length === 0) return null;
-  const acc = new Map<string, OrgDriver & { money: Map<string, number | null> }>();
+  const acc = new Map<string, OrgDriver & { money: Map<string, number | null>; spent: Map<string, number | null> }>();
   let paid = 0;
   let attributed = 0;
   let unattributed = 0;
@@ -350,7 +359,10 @@ export function aggregateMarketing(summaries: MarketingSummary[]): OrgMarketing 
       const key = d.campaign ? `campaign:${d.campaign.id}` : `link:${d.code}`;
       let a = acc.get(key);
       if (!a) {
-        a = { key, code: d.code, label: d.label, kind: d.kind, campaignSentAt: d.campaign?.sentAt ?? null, shows: 0, orders: 0, paidTickets: 0, grossAfterRefunds: [], ticketShare: 0, money: new Map() };
+        a = {
+          key, code: d.code, label: d.label, kind: d.kind, campaignSentAt: d.campaign?.sentAt ?? null, shows: 0, orders: 0, paidTickets: 0,
+          grossAfterRefunds: [], ticketShare: 0, channel: d.channel, spend: [], costPerPaidTicket: [], money: new Map(), spent: new Map(),
+        };
         acc.set(key, a);
       }
       a.shows++;
@@ -360,22 +372,41 @@ export function aggregateMarketing(summaries: MarketingSummary[]): OrgMarketing 
         const prev = a.money.has(g.currency) ? a.money.get(g.currency)! : 0;
         a.money.set(g.currency, prev === null || g.minor === null ? null : addMinor(prev, g.minor));
       }
+      for (const sp of d.spend) {
+        const prev = a.spent.has(sp.currency) ? a.spent.get(sp.currency)! : 0;
+        a.spent.set(sp.currency, prev === null || sp.minor === null ? null : addMinor(prev, sp.minor));
+      }
     }
   }
-  const drivers = [...acc.values()].map(({ money, ...d }) => ({
-    ...d,
-    grossAfterRefunds: [...money.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([currency, minor]) => ({ currency, minor })),
-    ticketShare: paid > 0 ? Math.floor((d.paidTickets * 100) / paid) : 0,
-  }));
+  const drivers = [...acc.values()].map(({ money, spent, ...d }) => {
+    const spend = [...spent.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([currency, minor]) => ({ currency, minor }));
+    return {
+      ...d,
+      grossAfterRefunds: [...money.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([currency, minor]) => ({ currency, minor })),
+      ticketShare: paid > 0 ? Math.floor((d.paidTickets * 100) / paid) : 0,
+      spend,
+      costPerPaidTicket: costPerTicket(spend, d.paidTickets),
+    };
+  });
+  const channels = new Map<Channel | "unassigned", { orders: number; paidTickets: number }>();
+  for (const d of drivers) {
+    const c = channels.get(d.channel ?? "unassigned") ?? { orders: 0, paidTickets: 0 };
+    c.orders += d.orders;
+    c.paidTickets += d.paidTickets;
+    channels.set(d.channel ?? "unassigned", c);
+  }
   drivers.sort((x, y) => y.paidTickets - x.paidTickets || y.orders - x.orders || x.label.localeCompare(y.label));
   return {
-    scope: "Upcoming shows · all sales to date",
+    scope,
     showCount: summaries.length,
     paidTickets: paid,
     attributedTickets: attributed,
     unattributedTickets: unattributed,
     trackedShare: paid > 0 ? Math.floor((attributed * 100) / paid) : 0,
     drivers,
+    byChannel: [...channels.entries()]
+      .map(([channel, v]) => ({ channel, ...v, ticketShare: paid > 0 ? Math.floor((v.paidTickets * 100) / paid) : 0 }))
+      .sort((x, y) => y.paidTickets - x.paidTickets),
   };
 }
 
@@ -385,6 +416,7 @@ export function buildOrgPulse(inputs: ShowInput[], now: Date): OrgPulse {
   const rank = (c: ShowCard) => (c.phase === "today" ? 0 : c.phase === "upcoming" ? 1 : c.phase === "unscheduled" ? 2 : 3);
   cards.sort((a, b) => rank(a) - rank(b) || (a.phase === "past" ? (b.daysUntil ?? 0) - (a.daysUntil ?? 0) : (a.daysUntil ?? 0) - (b.daysUntil ?? 0)));
 
+  const upcoming = inputs.filter((i) => cards.some((c) => c.id === i.id && (c.phase === "upcoming" || c.phase === "today")));
   const gross = new Map<string, { minor: number | null; status: MeasureStatus }>();
   for (const c of cards) {
     if ((c.phase !== "upcoming" && c.phase !== "today") || !c.revenue || !c.currency) continue;
@@ -402,10 +434,10 @@ export function buildOrgPulse(inputs: ShowInput[], now: Date): OrgPulse {
       paidTicketsLast7Days: cards.reduce((a, c) => a + (c.pace?.last7DaysPaidTickets ?? 0), 0),
       upcomingGrossByCurrency: [...gross.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, v]) => ({ currency, ...v })),
     },
-    marketing: aggregateMarketing(
-      inputs
-        .filter((i) => i.marketing && cards.some((c) => c.id === i.id && (c.phase === "upcoming" || c.phase === "today")))
-        .map((i) => i.marketing!),
+    marketing: aggregateMarketing(upcoming.map((i) => i.marketing).filter((m): m is MarketingSummary => Boolean(m))),
+    marketingLast7Days: aggregateMarketing(
+      upcoming.map((i) => i.marketingLast7Days).filter((m): m is MarketingSummary => Boolean(m)),
+      "Upcoming shows · orders in the last 7 days",
     ),
     shows: cards,
   };

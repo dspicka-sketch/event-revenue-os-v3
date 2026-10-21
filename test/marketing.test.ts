@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMarketing, type CampaignRef } from "../src/domain/marketing.js";
+import { computeMarketing, costPerTicket, type CampaignRef } from "../src/domain/marketing.js";
 import { normalizeAttendee, normalizeOrder, type EbAttendee } from "../src/providers/eventbrite/normalize.js";
 import { attendees, costs, order } from "./helpers/build.js";
 
@@ -81,5 +81,40 @@ describe("computeMarketing", () => {
   it("rejects malformed tracking codes rather than storing arbitrary text", () => {
     const s = sale("o1", "2026-09-04T10:00:00Z", 1, "<script>alert(1)</script>");
     expect(s.lines[0]!.trackingCode).toBeNull();
+  });
+
+  it("assigns channels: campaigns are email, links use the admin's channel, others are unassigned", () => {
+    const m = computeMarketing(
+      [...[sale("o1", "2026-09-04T10:00:00Z", 2, "mc-announce"), sale("o2", "2026-09-20T10:00:00Z", 3, "ig-bio"), sale("o3", "2026-09-21T10:00:00Z", 1, "flyer")]].map((x) => x.order),
+      [sale("o1", "2026-09-04T10:00:00Z", 2, "mc-announce"), sale("o2", "2026-09-20T10:00:00Z", 3, "ig-bio"), sale("o3", "2026-09-21T10:00:00Z", 1, "flyer")].flatMap((x) => x.lines),
+      [announce],
+      { links: { "ig-bio": { label: "Instagram bio link", channel: "social" } } },
+    );
+    expect(m.drivers.map((d) => [d.label, d.channel])).toEqual([["Instagram bio link", "social"], ["On sale now", "email"], ["flyer", null]]);
+    expect(m.byChannel).toEqual([
+      { channel: "social", orders: 1, paidTickets: 3, ticketShare: 50 },
+      { channel: "email", orders: 1, paidTickets: 2, ticketShare: 33 },
+      { channel: "unassigned", orders: 1, paidTickets: 1, ticketShare: 16 },
+    ]);
+  });
+
+  it("can count only recent orders", () => {
+    const sales = [sale("old", "2026-09-04T10:00:00Z", 2, "ig-bio"), sale("new", "2026-10-18T10:00:00Z", 3, "ig-bio")];
+    const m = computeMarketing(sales.map((x) => x.order), sales.flatMap((x) => x.lines), [], { since: new Date("2026-10-13T00:00:00Z") });
+    expect(m).toMatchObject({ paidTickets: 3, since: "2026-10-13T00:00:00.000Z" });
+    expect(m.drivers[0]).toMatchObject({ paidTickets: 3, spend: [] });
+  });
+
+  it("computes cost per paid ticket from spend, and keeps spend-only sources on the board", () => {
+    const sales = [sale("o1", "2026-09-20T10:00:00Z", 4, "fb-ads")];
+    const spend = { "fb-ads": [{ currency: "USD", minor: 30000 }], "tiktok": [{ currency: "USD", minor: 15000 }] };
+    const m = computeMarketing(sales.map((x) => x.order), sales.flatMap((x) => x.lines), [], { spend });
+    expect(m.drivers[0]).toMatchObject({ code: "fb-ads", paidTickets: 4, spend: [{ currency: "USD", minor: 30000 }], costPerPaidTicket: [{ currency: "USD", minor: 7500 }] });
+    expect(m.drivers[1]).toMatchObject({ code: "tiktok", paidTickets: 0, spend: [{ currency: "USD", minor: 15000 }], costPerPaidTicket: [{ currency: "USD", minor: null }] });
+  });
+
+  it("rounds cost per ticket half up in integer minor units and never mixes currencies", () => {
+    expect(costPerTicket([{ currency: "USD", minor: 1000 }, { currency: "CAD", minor: 1001 }], 3)).toEqual([{ currency: "USD", minor: 333 }, { currency: "CAD", minor: 334 }]);
+    expect(costPerTicket([{ currency: "USD", minor: 5 }], 2)).toEqual([{ currency: "USD", minor: 3 }]);
   });
 });

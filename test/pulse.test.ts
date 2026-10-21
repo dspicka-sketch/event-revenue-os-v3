@@ -80,8 +80,8 @@ describe("buildShowCard", () => {
 });
 
 describe("marketing on the show card", () => {
-  const base = { windowDays: 7, salesOrders: 30, paidTickets: 60, attributedOrders: 5, attributedTickets: 12, trackedShare: 20, outsideWindow: [], conflictingOrders: 0, unattributed: { orders: 25, paidTickets: 48 } };
-  const driver = (code: string, t: number) => ({ code, label: code, kind: "tracking_link" as const, campaign: null, orders: 1, paidTickets: t, grossAfterRefunds: [], ticketShare: 0, ordersPer100Clicks: null });
+  const base = { byChannel: [], since: null, windowDays: 7, salesOrders: 30, paidTickets: 60, attributedOrders: 5, attributedTickets: 12, trackedShare: 20, outsideWindow: [], conflictingOrders: 0, unattributed: { orders: 25, paidTickets: 48 } };
+  const driver = (code: string, t: number) => ({ code, label: code, kind: "tracking_link" as const, campaign: null, orders: 1, paidTickets: t, grossAfterRefunds: [], ticketShare: 0, ordersPer100Clicks: null, channel: null, spend: [], costPerPaidTicket: [] });
 
   it("summarizes the top drivers and flags mostly untracked sales", () => {
     const c = buildShowCard(input({ marketing: { ...base, drivers: [driver("a", 6), driver("b", 4), driver("c", 1), driver("d", 1)], campaignsWithoutOrders: [] } }), NOW);
@@ -104,12 +104,13 @@ describe("marketing on the show card", () => {
 describe("org-level what's working", () => {
   const show = (drivers: { code: string; campaign?: string; t: number; g: number }[], paid: number) => ({
     windowDays: 7, salesOrders: 10, paidTickets: paid, attributedOrders: drivers.length, attributedTickets: drivers.reduce((a, d) => a + d.t, 0),
-    trackedShare: 0, outsideWindow: [], conflictingOrders: 0, campaignsWithoutOrders: [],
+    trackedShare: 0, outsideWindow: [], conflictingOrders: 0, campaignsWithoutOrders: [], byChannel: [], since: null,
     unattributed: { orders: 1, paidTickets: paid - drivers.reduce((a, d) => a + d.t, 0) },
     drivers: drivers.map((d) => ({
       code: d.code, label: d.campaign ?? d.code, kind: d.campaign ? ("campaign" as const) : ("tracking_link" as const),
       campaign: d.campaign ? { id: d.campaign, source: "mailchimp" as const, title: d.campaign, sentAt: "2026-10-13T17:00:00Z", emailsSent: 1, uniqueOpens: 1, eventLinkClicks: 1 } : null,
       orders: 1, paidTickets: d.t, grossAfterRefunds: [{ currency: "USD", minor: d.g }], ticketShare: 0, ordersPer100Clicks: null,
+      channel: d.campaign ? ("email" as const) : ("social" as const), spend: d.campaign ? [] : [{ currency: "USD", minor: 300 }], costPerPaidTicket: [],
     })),
   });
 
@@ -123,6 +124,9 @@ describe("org-level what's working", () => {
     expect(m).toMatchObject({ showCount: 2, paidTickets: 30, attributedTickets: 21, unattributedTickets: 9, trackedShare: 70 });
     expect(m.drivers[0]).toMatchObject({ code: "ig-bio", shows: 2, paidTickets: 16, ticketShare: 53, grossAfterRefunds: [{ currency: "USD", minor: 1600 }] });
     expect(m.drivers[1]).toMatchObject({ label: "Last call", kind: "campaign", shows: 1, paidTickets: 5 });
+    // ig-bio had $3.00 spend on each of the two upcoming shows: $6.00 / 16 tickets = 37.5c -> 38c.
+    expect(m.drivers[0]).toMatchObject({ channel: "social", spend: [{ currency: "USD", minor: 600 }], costPerPaidTicket: [{ currency: "USD", minor: 38 }] });
+    expect(m.byChannel.map((c) => [c.channel, c.paidTickets])).toEqual([["social", 16], ["email", 5]]);
   });
 
   it("is null without any marketing data", () => {

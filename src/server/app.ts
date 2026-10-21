@@ -9,12 +9,12 @@ import fastifyCors from "@fastify/cors";
 import { authenticate, listMemberOrganizations, login, LoginThrottle, logout, roleIn, type AuthedUser, type Role } from "../auth/accounts.js";
 import type { Db } from "../db/pool.js";
 import {
-  campaignRefsForEvent, listConnectionsByProvider, loadEventRecords, setTrackingLabel, trackingLabels,
+  campaignRefsForEvent, listConnectionsByProvider, loadEventRecords, marketingSpendForEvent, setMarketingSpend, setTrackingLink, trackingLinks,
   deleteTarget, getEventSummary, getConnection, getOrganization, listConnections, listEventSummaries, listSyncRuns, listTargets,
   ticketClassBreakdown, upsertTarget, type EventSummaryRow, type TargetRow,
 } from "../db/repo.js";
 import { buildOrgPulse, buildShowCard, type ShowInput, type Target } from "../domain/pulse.js";
-import { computeMarketing, type MarketingSummary } from "../domain/marketing.js";
+import { CHANNELS, computeMarketing, type Channel, type LinkInfo, type MarketingSummary } from "../domain/marketing.js";
 import { defaultMarketingAdapterFactory, syncMarketingConnection, type MarketingAdapterFactory } from "../sync/syncMarketing.js";
 import { MEASURE_DEFINITIONS } from "../domain/revenue.js";
 import { actionFor, ProviderError } from "../providers/errors.js";
@@ -23,6 +23,7 @@ import type {
 } from "../shared/apiTypes.js";
 import { syncEvent, type AdapterFactory, defaultAdapterFactory } from "../sync/syncEvent.js";
 
+const CODE_RE = /^[A-Za-z0-9._~-]{1,100}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MEASURES = new Set(["paidTickets", "grossAfterRefunds", "organizerProceeds"]);
 
@@ -78,7 +79,7 @@ function targetsFor(rows: TargetRow[], eventId: string): Target[] {
     .map((t) => ({ measure: t.measure, value: t.target_value, currency: t.currency, source: t.source, updatedAt: iso(t.updated_at) }));
 }
 
-function eventDto(r: EventSummaryRow, targets: Target[], marketing: MarketingSummary | null): EventDto {
+function eventDto(r: EventSummaryRow, targets: Target[], mk: { toDate: MarketingSummary; last7Days: MarketingSummary } | null): EventDto {
   const latestRun = r.latest_run;
   const hasData = r.latest_result !== null;
   // Stale: there is retained data but the most recent attempt failed.
@@ -111,7 +112,8 @@ function eventDto(r: EventSummaryRow, targets: Target[], marketing: MarketingSum
     sourceReport: r.source_report,
     reportComparison: r.report_comparison,
     targets,
-    marketing,
+    marketing: mk?.toDate ?? null,
+    marketingLast7Days: mk?.last7Days ?? null,
   };
 }
 
@@ -132,6 +134,7 @@ function showInput(e: EventDto): ShowInput {
     reportComparison: e.reportComparison,
     targets: e.targets,
     marketing: e.marketing,
+    marketingLast7Days: e.marketingLast7Days,
   };
 }
 
@@ -142,14 +145,18 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const marketingFactory = opts.marketingAdapterFactory ?? defaultMarketingAdapterFactory;
 
   /** Attribution for one show from stored tickets and stored campaigns (D13). */
-  async function marketingFor(orgId: string, r: EventSummaryRow, labels?: Record<string, string>): Promise<MarketingSummary | null> {
+  async function marketingFor(orgId: string, r: EventSummaryRow, links?: Record<string, LinkInfo>): Promise<{ toDate: MarketingSummary; last7Days: MarketingSummary } | null> {
     if (!r.latest_result) return null;
-    const [rec, refs, names] = await Promise.all([
+    const [rec, refs, info, spend] = await Promise.all([
       loadEventRecords(db, orgId, r.id),
       campaignRefsForEvent(db, orgId, r.provider, r.source_event_id),
-      labels ?? trackingLabels(db, orgId),
+      links ?? trackingLinks(db, orgId),
+      marketingSpendForEvent(db, orgId, r.id),
     ]);
-    return computeMarketing(rec.orders, rec.lines, refs, { labels: names });
+    return {
+      toDate: computeMarketing(rec.orders, rec.lines, refs, { links: info, spend }),
+      last7Days: computeMarketing(rec.orders, rec.lines, refs, { links: info, since: new Date(now().getTime() - 7 * 86400_000) }),
+    };
   }
   const now = opts.now ?? (() => new Date());
   const throttle = new LoginThrottle();
@@ -226,8 +233,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // ---- shows
 
   async function loadEvents(orgId: string): Promise<EventDto[]> {
-    const [rows, targets, labels] = await Promise.all([listEventSummaries(db, orgId), listTargets(db, orgId), trackingLabels(db, orgId)]);
-    return Promise.all(rows.map(async (r) => eventDto(r, targetsFor(targets, r.id), await marketingFor(orgId, r, labels))));
+    const [rows, targets, links] = await Promise.all([listEventSummaries(db, orgId), listTargets(db, orgId), trackingLinks(db, orgId)]);
+    return Promise.all(rows.map(async (r) => eventDto(r, targetsFor(targets, r.id), await marketingFor(orgId, r, links))));
   }
 
   app.get<{ Params: { orgId: string } }>("/api/orgs/:orgId/pulse", async (req, reply) => {
@@ -315,19 +322,40 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   // ---- tracking-link names (admin)
 
-  app.put<{ Params: { orgId: string; code: string }; Body: { label?: unknown } }>("/api/orgs/:orgId/tracking-links/:code", async (req, reply) => {
+  app.put<{ Params: { orgId: string; code: string }; Body: { label?: unknown; channel?: unknown } }>("/api/orgs/:orgId/tracking-links/:code", async (req, reply) => {
     const org = await orgFor(req, reply, "admin");
     if (!org) return;
     const { code } = req.params;
-    if (!/^[A-Za-z0-9._~-]{1,100}$/.test(code)) return reply.code(400).send({ error: "bad_request", message: "Not a valid tracking code." });
-    const raw = req.body?.label;
-    const label = typeof raw === "string" ? raw.trim() : raw === null ? null : undefined;
+    if (!CODE_RE.test(code)) return reply.code(400).send({ error: "bad_request", message: "Not a valid tracking code." });
+    const { label: rawLabel, channel: rawChannel } = req.body ?? {};
+    const label = typeof rawLabel === "string" ? rawLabel.trim() : rawLabel === null || rawLabel === undefined ? null : undefined;
     if (label === undefined || (label !== null && (label.length < 1 || label.length > 80))) {
       return reply.code(400).send({ error: "bad_request", message: "Name must be 1–80 characters, or null to clear it." });
     }
-    await setTrackingLabel(db, org.id, code, label, req.user!.userId);
+    const channel = rawChannel === null || rawChannel === undefined ? null : (CHANNELS as readonly unknown[]).includes(rawChannel) ? (rawChannel as Channel) : undefined;
+    if (channel === undefined) return reply.code(400).send({ error: "bad_request", message: `Channel must be one of ${CHANNELS.join(", ")}, or null.` });
+    await setTrackingLink(db, org.id, code, { label, channel }, req.user!.userId);
     return { ok: true };
   });
+
+  /** Spend entered for one source on one show (D16): an expense input, never revenue. */
+  app.put<{ Params: { orgId: string; eventId: string; code: string }; Body: { amountMinor?: unknown; currency?: unknown } }>(
+    "/api/orgs/:orgId/events/:eventId/marketing-spend/:code",
+    async (req, reply) => {
+      const org = await orgFor(req, reply, "admin");
+      if (!org) return;
+      const { eventId, code } = req.params;
+      if (!UUID.test(eventId) || !(await getEventSummary(db, org.id, eventId))) return reply.code(404).send({ error: "not_found" });
+      if (!CODE_RE.test(code)) return reply.code(400).send({ error: "bad_request", message: "Not a valid tracking code." });
+      const { amountMinor, currency } = req.body ?? {};
+      if (typeof currency !== "string" || !/^[A-Za-z]{3}$/.test(currency)) return reply.code(400).send({ error: "bad_request", message: "A 3-letter currency is required." });
+      if (amountMinor !== null && (typeof amountMinor !== "number" || !Number.isSafeInteger(amountMinor) || amountMinor < 0)) {
+        return reply.code(400).send({ error: "bad_request", message: "Spend must be a non-negative whole number of minor units (e.g. cents), or null to clear it." });
+      }
+      await setMarketingSpend(db, org.id, eventId, code, currency.toUpperCase(), amountMinor as number | null, req.user!.userId);
+      return { ok: true };
+    },
+  );
 
   // ---- integrations
 
