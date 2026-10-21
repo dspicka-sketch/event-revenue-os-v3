@@ -2,19 +2,27 @@
 
 RevOS links the systems a live-event business already uses (ticketing, marketing, website, planning, resale), normalizes their records, and shows a revenue dashboard you can trust. It does not replace any of them. It never sends campaigns, changes inventory or writes to vendor systems.
 
-**Current milestone: M1.** One vertical slice: Eventbrite → stored normalized orders → reconciled event revenue → private dashboard. See [`docs/STATUS.md`](docs/STATUS.md) for exactly what is verified and what is not.
+Two clients share one backend, database, set of integrations, authentication and set of revenue calculations:
+
+- **Desktop web app** (`src/web/`): detailed analysis, reconciliation and integration management.
+- **Mobile app** (`mobile/`, Expo/React Native): a 30-second view of every show's tickets, revenue, pace, targets and items needing attention.
+
+See [`docs/STATUS.md`](docs/STATUS.md) for exactly what is verified, [`docs/ROADMAP.md`](docs/ROADMAP.md) for milestones, and [`CLAUDE.md`](CLAUDE.md) for the project rules.
 
 ## Stack
 
 Node.js 22 + TypeScript, Fastify (server API), PostgreSQL 16 (plain SQL migrations), React 19 + Vite (UI), Vitest (tests). The reasons are in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 ```
-src/domain/        Money and revenue rules (pure: no I/O, no vendor or UI code)
+src/domain/        Money, revenue, show-card and attention rules (pure; shared by server, web and mobile)
+src/shared/        API contract types shared by server, web and mobile
+src/auth/          Users, org memberships, sessions
 src/providers/     Vendor adapters (Eventbrite: client, normalization, fixtures)
 src/db/            Migrations, connection pool, repository (all queries scoped to an organization)
 src/sync/          Manual sync: bounded full read → upsert → recompute
 src/server/        HTTP API (the browser talks only to this)
-src/web/           Dashboard UI
+src/web/           Desktop web client
+mobile/            Mobile client (Expo); see mobile/README.md
 scripts/           Fixture seed, live setup, CLI sync, report comparison, secret scan
 test/              Unit and database-backed tests
 ```
@@ -28,7 +36,7 @@ npm ci
 cp .env.example .env            # then edit DATABASE_URL / TEST_DATABASE_URL
 createdb revos_dev && createdb revos_test   # or create them however you prefer
 npm run db:migrate
-npm run seed:fixture            # optional: isolated FIXTURE organization with synthetic data
+npm run seed:fixture            # optional: FIXTURE organization + demo account (password printed once)
 npm run build                   # builds the UI into dist/web
 npm start                       # http://127.0.0.1:8787
 ```
@@ -38,9 +46,8 @@ During development, run `npm run dev`: API on :8787 and UI with hot reload on ht
 ### Tests and checks
 
 ```bash
-npm test                        # unit and DB tests (DB tests are skipped if TEST_DATABASE_URL is unset)
-npm run typecheck
-npm run build && npm run check:secrets   # scan Git-tracked files and the built bundle for credentials/PII
+npm run check                   # typecheck + tests + build + secret/PII scan (DB tests need TEST_DATABASE_URL)
+npm run check:mobile            # mobile typecheck + tests
 ```
 
 ## Live setup (Eventbrite, read-only)
@@ -61,6 +68,20 @@ npm run build && npm run check:secrets   # scan Git-tracked files and the built 
 
 Only after step 5 shows zero unexplained difference should fee ownership be recorded and `proceeds_policy` changed from `unverified`. Until then, organizer proceeds stay **Unavailable** on live data, by design.
 
-## Access control
+## Accounts and access
 
-The server listens on 127.0.0.1 by default. To listen on any other address you must set `REVOS_ACCESS_TOKEN`; the server refuses to start without it. The UI then asks for that token and keeps it only for the current browser tab. This is a pilot gate, not multi-user auth. Put real authentication in front of any hosted deployment before it shows real data.
+There is no public sign-up. Create accounts from the command line:
+
+```bash
+npm run user -- create you@example.com --name "Your Name"   # prints a one-time password
+npm run user -- grant you@example.com <organizationId> admin  # or viewer
+npm run user -- reset-password you@example.com
+```
+
+The same account signs in on desktop and mobile. **Admins** can set targets and test connections. **Viewers** can read data and run Refresh. People who aren't members of an organization can't see it at all.
+
+The server listens on 127.0.0.1 by default. To let a phone reach it on your local network, run it with `HOST=0.0.0.0`. Before exposing it beyond a trusted network, put it behind HTTPS (a reverse proxy) — see `docs/DECISIONS.md` D10 for what remains before public hosting.
+
+## Mobile app
+
+See [`mobile/README.md`](mobile/README.md). Short version: `cd mobile && npm ci && npx expo start`, then open it in Expo Go or a development build and sign in with your RevOS account and server address.

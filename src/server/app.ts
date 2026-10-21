@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
+import fastifyCors from "@fastify/cors";
 import { authenticate, listMemberOrganizations, login, LoginThrottle, logout, roleIn, type AuthedUser, type Role } from "../auth/accounts.js";
 import type { Db } from "../db/pool.js";
 import {
@@ -37,6 +38,11 @@ export interface AppOptions {
   webDir?: string;
   logger?: boolean;
   now?: () => Date;
+  /**
+   * Browser origins allowed to call the API cross-origin (e.g. the mobile web
+   * preview). Native mobile apps do not need CORS. Empty = same-origin only.
+   */
+  corsOrigins?: string[];
 }
 
 declare module "fastify" {
@@ -115,9 +121,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const now = opts.now ?? (() => new Date());
   const throttle = new LoginThrottle();
 
+  if (opts.corsOrigins?.length) {
+    // Bearer tokens only (no cookies), so credentials mode is not needed.
+    await app.register(fastifyCors, { origin: opts.corsOrigins, methods: ["GET", "POST", "PUT", "DELETE"], allowedHeaders: ["Authorization", "Content-Type"] });
+  }
+
   // ---- authentication (same bearer sessions for web and mobile)
   app.addHook("onRequest", async (req, reply) => {
-    if (!req.url.startsWith("/api/")) return;
+    if (!req.url.startsWith("/api/") || req.method === "OPTIONS") return;
     if (req.url === "/api/health" || req.url === "/api/auth/login") return;
     const h = req.headers.authorization ?? "";
     const user = h.startsWith("Bearer ") ? await authenticate(db, h.slice(7)) : null;

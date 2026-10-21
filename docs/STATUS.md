@@ -1,48 +1,56 @@
 # Status
 
-_Last updated: 2026-10-20 (M1 in progress — live verification BLOCKED)_
+_Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (see ROADMAP.md). Live verification: BLOCKED._
 
-## Completed (M1)
+## Completed
 
-- Scaffold: TypeScript/Node 22, Fastify API, PostgreSQL migrations, React/Vite UI, lockfile, `.gitignore`, `.env.example` (placeholders only), README.
-- Domain: integer minor-unit money, unknown ≠ zero, per-currency measures with complete/partial/unavailable status, and definitions for every measure.
-- Eventbrite adapter (read-only): Bearer auth, explicit organization + event, bounded continuation pagination, retries for 429/5xx/timeout/network with `Retry-After`, and specific error classes (auth, forbidden, not_found, rate_limited, timeout, network, server, bad_response, limit_exceeded). The event's organization is checked against the configured account.
-- Store: organizations, source connections (secret *reference* only), canonical events (one per performance), source event mappings, orders, order lines, sync runs, reconciliation results. Unique keys are (organization, provider, account, source ID), and every tenant query is scoped by organization.
-- Sync: manual Refresh does a full bounded read, upserts, flags missing records and recomputes from stored rows. Last good data is retained and marked stale when a sync fails.
-- Dashboard: event list (performance date in venue timezone, paid tickets, gross after refunds, proceeds, last-7-day paid tickets by transaction date, freshness) and show detail (ticket counts, revenue components with definitions, reconciliation table, exceptions, ticket classes, sync history, Refresh). The fixture banner is prominent, and the layout works at 390 px width without horizontal scroll.
-- Fixtures: synthetic two-performance show. A second Refresh applies a full refund, a partial refund and a new order.
+### M1: Desktop Eventbrite slice (code complete; live gate blocked)
+- Read-only Eventbrite adapter: Bearer auth, explicit org + event, bounded continuation pagination, retries for 429/5xx/timeout with `Retry-After`, specific error kinds, and an org-ownership check.
+- Normalized store keyed by (org, provider, account, source ID). Full re-read on Refresh, missing records flagged, last good data kept and labeled stale.
+- Money/revenue engine: integer minor units, unknown ≠ zero, per-currency measures with status and definitions, order-level charges counted once, refunds and partial refunds flagged, and proceeds gated by documented fee ownership.
+- Desktop: show list, show detail (counts, revenue components, reconciliation table, exceptions, ticket classes, sync history, Refresh) and the fixture banner.
 
-## Verification actually performed
+### M1.1: Shared platform for both clients
+- Per-user accounts, org roles (admin/viewer) and hashed bearer sessions (web 14 d, mobile 30 d). Non-members get 404. Sign-in is throttled and the `npm run user` CLI manages accounts. This replaces the old single access token.
+- Daily net sales by venue-local sale date, in the shared revenue engine.
+- Shared show-card and attention rules (`src/domain/pulse.ts`): phase/days until, 14-day pace, manual targets with a run-rate "behind" check, and attention items (not configured, stale, sync error, no data, not refreshed in 24 h, reconciliation difference, records to review, behind target, multiple currencies, partial counts).
+- API: `/api/auth/login|logout`, `/api/me`, `/api/orgs/:id/pulse`, targets PUT/DELETE (admin), connections list and test (admin), plus an opt-in CORS allowlist (`REVOS_CORS_ORIGINS`).
+- Desktop additions: sign-in, Shows/Integrations navigation, summary tiles, target and attention columns, a needs-attention panel, a target editor (money parsed as a decimal string into minor units), a 14-day pace chart with tooltip and table view, and an integrations page (status, whether a credential is present — never its value, test connection, planned connectors).
+
+### M1.5: Mobile client (Expo SDK 58 / React Native 0.88), in progress
+- Sign-in with server address, session stored in the OS secure store, org switching.
+- Shows screen: summary (upcoming shows, sold in last 7 days, upcoming gross, shows needing attention) and show cards (when, tickets, gross, last 7 days vs prior 7, first target meter, 14-day pace bars, top attention item, freshness, fixture/stale pills).
+- Show screen: attention list, tickets and pace chart, targets, revenue summary (same figures as desktop), data freshness and Refresh from source.
+- Account screen: org list with role and FIXTURE/LIVE labels, sign out.
+- Shared code: `@revos/domain` and `@revos/shared` resolve to `../src`, so no revenue logic is duplicated.
+
+## Verification actually performed (2026-10-21)
 
 | Check | Result |
 |---|---|
-| `npm test` (local PostgreSQL 16) | 44/44 passed: money (5), revenue rules (12), Eventbrite client (10), DB sync (11), HTTP API (6) |
-| `npm run typecheck` | passes |
-| `npm run build` + `npm run check:secrets` | no credential/PII patterns in 42 tracked files or the built bundle |
-| Manual run | seeded fixture org, started server, refreshed via API, screenshotted list and detail at 1280 px and 390 px |
+| `npm run check` (local PostgreSQL 16) | typecheck OK; **61/61 tests** passed (money 6, revenue 12, pulse 8, Eventbrite client 10, DB sync 11, HTTP API 14); web build OK; secret/PII scan clean (86 files + bundle) |
+| Mobile `npm run typecheck` / `npm test` | OK / 6/6 passed |
+| `npx expo export --platform web` and `--platform ios` | Both bundles built (iOS Hermes bytecode, 2.7 MB), including the shared domain modules |
+| Desktop manual run (Playwright, 1280 px and 390 px) | sign-in → shows → show detail (pace tooltip) → integrations (test connection). No horizontal overflow at 390 px after fixing a hidden-header overflow bug |
+| Mobile web preview (Playwright, 390×844, light + dark) | sign-in → shows → show detail → Refresh → account. Figures identical to desktop for the same show |
 
-Acceptance gates covered by tests: duplicate sync, multi-page reads, multi-line orders, full/partial refunds and cancellations, missing fees, 401/403/429/timeout, failed sync after success, multiple performances, organizations and currencies, and the secret/PII scan.
+Not verified: the app on a physical iPhone or Android phone, or in a simulator. The build environment has neither.
 
-## BLOCKED: live verification
+## BLOCKED
 
-- **No Eventbrite credentials** have been supplied to this environment.
-- This cloud build environment's **network policy denies `www.eventbriteapi.com` and `www.eventbrite.com`**, so neither the official API reference nor the live API could be reached.
-- As a result, everything in `docs/integrations.md` marked ASSUMED or SECONDHAND is unverified. That covers money-field semantics, status values, the attendee default filter, partial-refund behavior and fee ownership. Live connections show organizer proceeds as Unavailable until this is resolved.
+- **Live Eventbrite read:** no credentials were supplied, and this cloud environment's network policy denies `www.eventbriteapi.com` / `www.eventbrite.com`. Every ASSUMED/SECONDHAND item in `docs/integrations.md` is still unverified, and live organizer proceeds stay Unavailable by design.
+- **Expo docs:** `docs.expo.dev` is also denied here. Mobile APIs were checked against the installed package type definitions (tsc) and real bundle exports instead.
+- **Push to GitHub:** the remote rejects pushes (403: Claude's GitHub app has no write access to `dspicka-sketch/event-revenue-os-v3`). All commits are local to this session's container.
 
 ## Unresolved gaps
 
-- Real-source reconciliation (gate "zero unexplained difference") has not been done.
-- Fee payer (buyer vs organizer) and refund fee treatment are not determined.
-- Allocation/capacity (ticket classes) is not read; discounts are not separated; payouts are not connected.
-- Access control is a single shared token (pilot only).
-- No sales-pace chart yet. Only the last-7-days figure is shown, and the brief calls for full pace after M1.
+- Real-source reconciliation (zero unexplained difference) not done; fee payer and refund fee treatment unknown.
+- Capacity/allocation, discounts and payouts are not read.
+- Public hosting needs HTTPS, a shared login throttle and password reset by email.
+- Mobile: on-device test, app icon/splash, push notifications and store distribution are not done.
 
-## Next action for Daniel
+## Next actions for Daniel
 
-Run M1 against the real event on **your own machine** (this cloud environment cannot reach Eventbrite):
-1. `git pull` this branch, `npm ci`, then create a local `.env` from `.env.example`.
-2. Add `EVENTBRITE_TOKEN`, `EVENTBRITE_ORGANIZATION_ID` and `EVENTBRITE_EVENT_ID` to `.env`. Never paste the token into chat.
-3. `npm run setup:live -- "Venue name"`, then `npm start`, then press Refresh on the event.
-4. Export Eventbrite's sales report for the same event with the filters described in the README, then run `npm run reconcile:compare`.
-
-Alternatively, add `www.eventbriteapi.com` to this cloud environment's allowed domains and store the token as an environment secret, and Claude Code can run step 3 here.
+1. **Fix GitHub access** so this work can be pushed: reconnect GitHub at https://claude.ai/connect-github and install the Claude GitHub App on the repository.
+2. **Run the live Eventbrite read** on your own machine (README → Live setup), or allow `www.eventbriteapi.com` in this environment's network settings and add the token as an environment secret.
+3. **Try the mobile app** on your phone: `HOST=0.0.0.0 npm start` at the repo root, then `cd mobile && npx expo start` and open it in Expo Go.

@@ -131,3 +131,31 @@ export function formatMoney(minor: MinorUnits, currency: string, locale = "en-US
   const fracStr = scale > 0 ? "." + String(frac).padStart(scale, "0") : "";
   return `${negative ? "-" : ""}${symbol}${majorStr}${fracStr}`;
 }
+
+/**
+ * Compact display for glanceable surfaces, e.g. 1389885 USD -> "$13.9K".
+ * Integer arithmetic only; below 1,000 major units shows whole units ("$812").
+ */
+export function formatMoneyCompact(minor: MinorUnits, currency: string, locale = "en-US"): string {
+  const scale = currencyScale(currency);
+  const negative = minor < 0;
+  const major = Math.trunc(Math.abs(minor) / 10 ** scale);
+  const symbol = new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 })
+    .formatToParts(0).filter((p) => p.type === "currency").map((p) => p.value).join("");
+  let body: string;
+  if (major < 1000) body = String(major);
+  else {
+    // Pick the unit after rounding so 999,950 becomes "1M", not "1000K".
+    const units: [number, string][] = [[100, "K"], [100_000, "M"], [100_000_000, "B"]];
+    let i = 0;
+    let tenths = Math.floor((major + units[0]![0] / 2) / units[0]![0]); // round half up, in tenths of the unit
+    while (tenths >= 10_000 && i < units.length - 1) {
+      i++;
+      tenths = Math.floor((major + units[i]![0] / 2) / units[i]![0]);
+    }
+    const whole = Math.floor(tenths / 10);
+    const frac = tenths % 10;
+    body = `${whole}${frac && whole < 100 ? `.${frac}` : ""}${units[i]![1]}`;
+  }
+  return `${negative ? "-" : ""}${symbol}${body}`;
+}

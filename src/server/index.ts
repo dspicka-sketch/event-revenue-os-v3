@@ -7,5 +7,6 @@ const port = Number(process.env.PORT ?? 8787);
 
 const db = createPool();
 await migrate(db);
-const app = await buildApp({ db, webDir: "dist/web", logger: true });
+const corsOrigins = (process.env.REVOS_CORS_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+const app = await buildApp({ db, webDir: "dist/web", logger: true, corsOrigins });
 await app.listen({ host, port });

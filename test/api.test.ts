@@ -157,6 +157,17 @@ describeDb("HTTP API", () => {
     expect((await signIn("viewer@example.com")).statusCode).toBe(429);
   });
 
+  it("allows only configured cross-origin callers", async () => {
+    const cors = await buildApp({ db, corsOrigins: ["http://localhost:8081"] });
+    const ok = await cors.inject({ method: "OPTIONS", url: "/api/me", headers: { origin: "http://localhost:8081", "access-control-request-method": "GET", "access-control-request-headers": "authorization" } });
+    expect(ok.headers["access-control-allow-origin"]).toBe("http://localhost:8081");
+    const bad = await cors.inject({ method: "OPTIONS", url: "/api/me", headers: { origin: "https://evil.example.com", "access-control-request-method": "GET" } });
+    expect(bad.headers["access-control-allow-origin"]).toBeUndefined();
+    const none = await app.inject({ url: "/api/health", headers: { origin: "http://localhost:8081" } });
+    expect(none.headers["access-control-allow-origin"]).toBeUndefined();
+    await cors.close();
+  });
+
   it("returns 404 for malformed IDs", async () => {
     expect((await app.inject({ url: `/api/orgs/nope/events`, headers: admin })).statusCode).toBe(404);
   });

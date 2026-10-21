@@ -31,7 +31,7 @@ try {
     [orgId, accountId, eventId]);
   const canonicalEventId = mapped.rows[0]?.canonical_event_id ??
     (await createMappedEvent(db, { organizationId: orgId, connectionId: conn.id, sourceEventId: eventId, name: `Eventbrite event ${eventId}` })).canonicalEventId;
-  console.log(`Grant access with: npm run user -- create you@yourdomain  then  npm run user -- grant you@yourdomain ${orgId} admin`);
+  console.log(`Grant access with: npm run user -- create you@example.com  then  npm run user -- grant you@example.com ${orgId} admin`);
   console.log(`Organization ${orgId}\nConnection ${conn.id}\nCanonical event ${canonicalEventId}\nNext: npm run sync -- ${orgId} ${canonicalEventId}  (or use Refresh in the UI)`);
 } finally {
   await db.end();
