@@ -53,3 +53,13 @@ docs/           STATUS.md, ROADMAP.md, DECISIONS.md, integrations.md
 - Record a proposed deviation in DECISIONS before making a large change.
 - Ask before paid provisioning, production migrations, app-store submission or any external write. Local work and read-only verification may proceed.
 - Never invent passing tests, deployed URLs or live verification. If blocked on access, mark it BLOCKED and state the exact next step.
+
+## Governance (applies to every session)
+- At the start of each session, invoke the `project-manager` subagent to open/update this
+  session's charter in `governance/sessions/<branch>.md`. It approves decisions within the
+  session's scope and logs them.
+- Anything cross-session, shared, architectural, or high-risk is escalated to the
+  `portfolio-manager` subagent, which decides portfolio-wide and logs to `governance/portfolio.md`.
+- Production deploys, spend, secrets, legal commitments, and merges to `main` are recommended
+  by the agents but decided by the human owner.
+- Authority definitions: `.claude/agents/project-manager.md`, `.claude/agents/portfolio-manager.md`.
