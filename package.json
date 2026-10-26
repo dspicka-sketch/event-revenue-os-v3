@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit tests/orchestration",
     "test:db": "vitest run tests/db",
-    "test:e2e": "playwright test",
+    "test:e2e": "node tests/e2e/journey.mjs",
     "roles:sync": "tsx scripts/sync-roles.ts",
     "roles:check": "tsx scripts/sync-roles.ts --check"
   },
@@ -21,6 +21,7 @@
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.118.0",
     "ai": "7.0.154",
+    "eve": "0.83.2",
     "next": "16.4.3",
     "pg": "8.23.1",
     "react": "19.3.1",
