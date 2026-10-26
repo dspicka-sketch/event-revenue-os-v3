@@ -19,3 +19,5 @@ Add session-level project managers and a portfolio manager with approval authori
 ## Decision Log
 | Date | Decision | Subject | Rationale |
 |------|----------|---------|-----------|
+| 2026-10-26 | APPROVED | Ready to merge | Agents, templates, register in place; owner approved without changes |
+| 2026-10-26 | ESCALATED | CLAUDE.md conflict with revos branch | Cross-session file; resolved by portfolio merge order |
