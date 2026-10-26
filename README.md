@@ -86,3 +86,9 @@ The server listens on 127.0.0.1 by default. To let a phone reach it on your loca
 ## Mobile app
 
 See [`mobile/README.md`](mobile/README.md). Short version: `cd mobile && npm ci && npx expo start`, then open it in Expo Go or a development build and sign in with your RevOS account and server address.
+
+## Executive OS
+
+The Executive OS assistant and dashboard (Next.js) lives in [`executive-os/`](executive-os/)
+as a separate app with its own `package.json`. See its README to run it. On Vercel, set the
+project's Root Directory to `executive-os`.
