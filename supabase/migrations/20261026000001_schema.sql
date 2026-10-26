@@ -244,7 +244,8 @@ create table public.decisions (
 create table public.price_observations (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
-  observed_on date not null,
+  observed_on date,                         -- null when the observation is undated
+  observed_on_note text,
   kind text not null check (kind in ('broker_list','outbound_proposal','user_reported','appraisal','agreed')),
   amount_cents bigint check (amount_cents is null or amount_cents >= 0),
   comparator text not null default 'exact' check (comparator in ('exact','below','above','approximately')),

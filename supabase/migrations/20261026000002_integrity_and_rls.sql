@@ -24,6 +24,12 @@ returns boolean language sql stable security definer set search_path = '' as $$
   select coalesce(public.member_role(p_project) = 'owner', false)
 $$;
 
+-- True only inside import_rows() run by a project owner (restores history verbatim).
+create or replace function public.importing(p_project uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select coalesce(current_setting('app.importing', true), '') = p_project::text
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Row version + updated_at. A writer must present the version it read
 -- (or leave it unchanged); a stale version is rejected.
@@ -169,7 +175,7 @@ create or replace function public.guard_decision()
 returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then
-    if new.state <> 'open' then
+    if new.state <> 'open' and not public.importing(new.project_id) then
       raise exception 'decisions are created open; record the decision separately' using errcode = '42501';
     end if;
     return new;
@@ -281,7 +287,7 @@ returns trigger language plpgsql security definer set search_path = '' as $$
 declare v_hash text;
 begin
   if tg_op = 'INSERT' then
-    if new.state <> 'requested' then
+    if new.state <> 'requested' and not public.importing(new.project_id) then
       raise exception 'approvals start as requested' using errcode = '42501';
     end if;
     return new;
