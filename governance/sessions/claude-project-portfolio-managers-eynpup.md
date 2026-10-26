@@ -2,7 +2,7 @@
 
 - **Opened:** 2026-10-26
 - **Project manager:** project-manager agent
-- **Status:** READY TO MERGE
+- **Status:** MERGED
 
 ## Goal
 Add session-level project managers and a portfolio manager with approval authority.
