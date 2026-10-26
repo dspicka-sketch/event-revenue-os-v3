@@ -14,6 +14,9 @@ import { planSpecialists } from "./planner";
 import { reconcile } from "./reconcile";
 import { DEFAULT_BUDGET, type EvidenceScope, type Job, type JobOutput, type MemberRole, type ProposalInput, type Run, type RunBudget } from "./types";
 
+/** A "what needs my attention" brief reconciles across strategy, legal and record integrity. */
+export const BRIEF_ROLES: SpecialistKey[] = ["strategist", "general_counsel", "data_engineer"];
+
 export const PROMPT_VERSION = `roles@${ROLE_SPEC_VERSION}/engine@1`;
 const SUBMIT = "submit_findings";
 
@@ -90,7 +93,7 @@ export class Orchestrator {
       live: this.model.live,
     });
     if (created) {
-      const plan = planSpecialists(input.question, input.roles);
+      const plan = planSpecialists(input.question, input.roles ?? (input.kind === "brief" ? BRIEF_ROLES : undefined));
       await this.store.insertJobs(run.id, run.project_id, plan);
       await this.store.patchRun(run.id, { planned_roles: plan.map((p) => p.role) });
       await this.store.addEvent(run.id, null, "run.planned", { roles: plan.map((p) => p.role), mode: this.model.live ? "live" : "fixture" });
