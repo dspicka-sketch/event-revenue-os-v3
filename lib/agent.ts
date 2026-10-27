@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { createEvent, listEvents } from "./calendar";
 import { createReplyDraft, getEmail, gmailConfigured, searchEmail } from "./gmail";
 import { getStore } from "./store";
 
@@ -15,8 +16,9 @@ Your job: keep their inbox triaged, their commitments tracked, and their day cle
 - Email triage: classify each message as urgent (needs action today), reply (needs a response, not today), fyi, or ignore. Record every classification with triage_email, with a one-line summary.
 - Drafts: when a reply is needed, write it in ${name}'s voice (warm, brief, decisive) and save it with draft_reply. You can only create drafts; ${name} reviews and sends them. Never claim an email was sent.
 - Tasks: when an email or conversation contains a commitment or deadline, create a task with a due date. Check list_tasks first so you don't duplicate one.
+- Calendar: check list_events before proposing times, and prefer gaps that keep focus blocks intact. Only add events with create_event when ${name} asks for it, and send invites to other people only when ${name} explicitly says to.
 - Be concise. Lead with what needs ${name}'s decision. Use short markdown lists.
-Today is ${new Date().toDateString()}.`;
+Now: ${new Date().toISOString()} (UTC).${process.env.EXEC_TIMEZONE ? ` ${name}'s time zone is ${process.env.EXEC_TIMEZONE}; give times in it and write event times with its UTC offset.` : ""}`;
 }
 
 const tools = () => {
@@ -63,6 +65,30 @@ const tools = () => {
         if (existing) await store.upsertTriage({ ...existing, draft_id: draftId });
         await store.log("draft", `Drafted reply: ${existing?.subject ?? id}`);
         return `Draft saved (${draftId})`;
+      },
+    }),
+    betaZodTool({
+      name: "list_events",
+      description: "List calendar events between two ISO datetimes (inclusive of overlapping events).",
+      inputSchema: z.object({ from: z.string().describe("ISO 8601 datetime"), to: z.string().describe("ISO 8601 datetime") }),
+      run: async ({ from, to }) => JSON.stringify(await listEvents(new Date(from), new Date(to))),
+    }),
+    betaZodTool({
+      name: "create_event",
+      description: "Add an event to the primary calendar. Invites go out only if send_invites is true.",
+      inputSchema: z.object({
+        title: z.string(),
+        start: z.string().describe("ISO 8601 datetime with offset"),
+        end: z.string().describe("ISO 8601 datetime with offset"),
+        description: z.string().optional(),
+        location: z.string().optional(),
+        attendees: z.array(z.string()).describe("Email addresses").optional(),
+        send_invites: z.boolean().optional(),
+      }),
+      run: async ({ send_invites, ...e }) => {
+        const ev = await createEvent({ ...e, sendInvites: send_invites });
+        await store.log("calendar", `Added event: ${ev.title}`);
+        return JSON.stringify(ev);
       },
     }),
     betaZodTool({
@@ -131,7 +157,7 @@ export async function runTriage(): Promise<string> {
 export async function runBriefing(): Promise<string> {
   const text = await runAssistant([{
     role: "user",
-    content: "Write my daily briefing. First triage new inbox mail (in:inbox newer_than:1d) and check my active tasks. Then write the briefing in markdown with sections: **Top 3 priorities today**, **Decisions needed**, **Overdue / due soon**, **Inbox** (urgent items + drafts waiting for my review). Keep it under 250 words. Output only the briefing.",
+    content: "Write my daily briefing. First triage new inbox mail (in:inbox newer_than:1d), check my active tasks, and list today's and tomorrow's calendar events. Then write the briefing in markdown with sections: **Top 3 priorities today**, **Schedule** (today's meetings with a one-line prep note each, and conflicts or back-to-backs), **Decisions needed**, **Overdue / due soon**, **Inbox** (urgent items + drafts waiting for my review). Keep it under 250 words. Output only the briefing.",
   }]);
   const store = getStore();
   await store.saveBriefing(text);

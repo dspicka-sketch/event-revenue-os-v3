@@ -2,18 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "@/components/Markdown";
-import type { Activity, Briefing, EmailTriage, Task } from "@/lib/types";
+import type { Activity, Briefing, CalendarEvent, EmailTriage, Task } from "@/lib/types";
 
 interface Dashboard {
   tasks: Task[];
   triage: EmailTriage[];
   briefing: Briefing | null;
   activity: Activity[];
-  integrations: { claude: boolean; store: "supabase" | "demo"; gmail: boolean };
+  events: CalendarEvent[];
+  integrations: { claude: boolean; store: "supabase" | "demo"; google: boolean };
 }
 interface ChatMsg { role: "user" | "assistant"; content: string }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
+const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const timeAgo = (iso: string) => {
   const m = Math.round((Date.now() - +new Date(iso)) / 60000);
   return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
@@ -74,7 +76,11 @@ export default function Home() {
   const [newTask, setNewTask] = useState({ title: "", due_date: "" });
   const chatEnd = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(() => api<Dashboard>("/api/dashboard").then(setData).catch((e) => setError(String(e))), []);
+  const refresh = useCallback(() => {
+    const from = new Date(); from.setHours(0, 0, 0, 0);
+    const to = new Date(from); to.setDate(to.getDate() + 1);
+    return api<Dashboard>(`/api/dashboard?from=${from.toISOString()}&to=${to.toISOString()}`).then(setData).catch((e) => setError(String(e)));
+  }, []);
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [chat, busy]);
 
@@ -99,6 +105,9 @@ export default function Home() {
   const dueToday = tasks.filter((t) => t.due_date === today()).length;
   const needsReply = triage.filter((t) => t.category === "urgent" || t.category === "reply").length;
   const drafts = triage.filter((t) => t.draft_id).length;
+  const events = data?.events ?? [];
+  const nowIso = new Date().toISOString();
+  const meetingsLeft = events.filter((e) => !e.allDay && e.end > nowIso && e.attendees.length).length;
   const hour = new Date().getHours();
 
   return (
@@ -109,7 +118,7 @@ export default function Home() {
           <h1 className="text-2xl font-semibold">Good {hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}</h1>
           {data && (
             <div className="mt-2 flex flex-wrap gap-2 text-xs">
-              {([["Claude", data.integrations.claude], ["Supabase", data.integrations.store === "supabase"], ["Gmail", data.integrations.gmail]] as const).map(([n, on]) => (
+              {([["Claude", data.integrations.claude], ["Supabase", data.integrations.store === "supabase"], ["Gmail + Calendar", data.integrations.google]] as const).map(([n, on]) => (
                 <span key={n} className="flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-muted">
                   <span className={`h-1.5 w-1.5 rounded-full ${on ? "bg-ok" : "bg-warn"}`} />
                   {n}{on ? "" : n === "Claude" ? " · not configured" : " · demo"}
@@ -130,12 +139,13 @@ export default function Home() {
 
       {error && <div className="mb-4 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
 
-      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <Stat label="Open tasks" value={tasks.length} />
         <Stat label="Overdue" value={overdue} tone="danger" />
         <Stat label="Due today" value={dueToday} tone="warn" />
         <Stat label="Needs reply" value={needsReply} tone="warn" />
         <Stat label="Drafts to review" value={drafts} />
+        <Stat label="Meetings left today" value={meetingsLeft} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -202,12 +212,37 @@ export default function Home() {
         </div>
 
         <div className="space-y-4">
+          <Panel title="Today's schedule">
+            {events.length === 0 ? (
+              <p className="text-sm text-muted">Nothing on the calendar today.</p>
+            ) : (
+              <ul className="space-y-1">
+                {events.map((e) => {
+                  const past = !e.allDay && e.end <= nowIso;
+                  const live = !e.allDay && e.start <= nowIso && e.end > nowIso;
+                  return (
+                    <li key={e.id} className={`flex gap-3 rounded-lg px-2 py-1.5 ${live ? "bg-accent/10" : ""} ${past ? "opacity-50" : ""}`}>
+                      <span className="w-16 shrink-0 text-xs tabular-nums text-muted">{e.allDay ? "All day" : clock(e.start)}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm">{e.link ? <a href={e.link} target="_blank" rel="noreferrer" className="hover:underline">{e.title}</a> : e.title}</div>
+                        {(e.attendees.length > 0 || e.location) && (
+                          <div className="truncate text-xs text-muted">{[e.location, e.attendees.length ? `${e.attendees.length} guest${e.attendees.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")}</div>
+                        )}
+                      </div>
+                      {live && <span className="shrink-0 text-xs font-medium text-accent">Now</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Panel>
+
           <Panel title="Assistant" className="flex h-[32rem] flex-col">
             <div className="-mx-1 flex-1 space-y-3 overflow-y-auto px-1">
               {chat.length === 0 && (
                 <div className="space-y-2">
                   <p className="text-sm text-muted">Ask me to triage, draft, plan or follow up.</p>
-                  {["What needs my attention today?", "Draft a reply to the sponsorship pricing email", "What's overdue and what should I push?"].map((s) => (
+                  {["What needs my attention today?", "Find 30 min this week to prep the Acme call", "What's overdue and what should I push?"].map((s) => (
                     <button key={s} onClick={() => send(s)} className="block w-full rounded-lg border border-line px-3 py-2 text-left text-sm hover:bg-bg">{s}</button>
                   ))}
                 </div>

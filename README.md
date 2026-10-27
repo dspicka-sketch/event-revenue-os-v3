@@ -6,9 +6,10 @@ An AI operating system dashboard with an executive assistant agent built on Clau
 - **Triage email:** search and read Gmail, then sort each message as urgent / reply / fyi / ignore
 - **Draft replies:** save reply drafts to Gmail threads. It cannot send anything; you review and send.
 - **Track tasks:** create, update and close follow-ups, with due dates taken from your email
-- **Write a daily briefing:** top priorities, decisions needed, due-soon items and inbox status. Runs on a weekday cron.
+- **Manage the calendar:** read your schedule, find time and add events. Invites go to other people only when you explicitly ask.
+- **Write a daily briefing:** top priorities, today's schedule with prep notes, decisions needed, due-soon items and inbox status. Runs on a weekday cron.
 
-**The dashboard** (`app/page.tsx`) shows KPI tiles, the latest briefing, the priority inbox, tasks, a chat with the assistant and an agent activity feed.
+**The dashboard** (`app/page.tsx`) shows KPI tiles, today's schedule, the latest briefing, the priority inbox, tasks, a chat with the assistant and an agent activity feed.
 
 ## Run locally
 
@@ -24,10 +25,10 @@ With only `ANTHROPIC_API_KEY` set, the app runs in **demo mode**: an in-memory s
 
 **Supabase:** run `supabase/migrations/0001_init.sql` in your project, then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The service-role key is only used on the server.
 
-**Gmail:**
-1. Create an OAuth client (Web app) in Google Cloud and enable the Gmail API.
-2. Get a refresh token with the scopes `gmail.readonly` and `gmail.compose`. The OAuth Playground with your own client is the easiest way.
-3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REFRESH_TOKEN`.
+**Gmail + Google Calendar:**
+1. Create an OAuth client (Web app) in Google Cloud and enable the Gmail API and the Google Calendar API.
+2. Get one refresh token with the scopes `gmail.readonly`, `gmail.compose` and `calendar.events`. The OAuth Playground with your own client is the easiest way.
+3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REFRESH_TOKEN`, plus `EXEC_TIMEZONE` (e.g. `America/New_York`) so the assistant schedules in your time zone.
 
 ## Deploy (Vercel)
 
@@ -38,10 +39,12 @@ Set the env vars, including `APP_SECRET` (the dashboard is then protected by bas
 | Path | Role |
 |---|---|
 | `lib/agent.ts` | System prompt, tools and the Claude tool runner (`claude-opus-5-5`, server-side refusal fallback) |
+| `lib/google.ts` | Shared Google OAuth token refresh |
 | `lib/gmail.ts` | Gmail REST client, with a sample inbox as fallback |
+| `lib/calendar.ts` | Google Calendar client, with a sample schedule as fallback |
 | `lib/store.ts` | Supabase store, with an in-memory demo store as fallback |
 | `app/api/*` | `agent` (chat), `triage`, `briefing` (cron + button), `tasks`, `dashboard` |
 | `proxy.ts` | Basic auth when `APP_SECRET` is set |
 
 ## Next modules
-Calendar (Google Calendar tools), and event revenue tracking (ticket/sponsor pipeline tiles) for Event Revenue OS.
+Event revenue tracking (ticket/sponsor pipeline tiles) for Event Revenue OS.
