@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "@/components/Markdown";
 import type { Activity, Briefing, CalendarEvent, EmailTriage, Task } from "@/lib/types";
+import type { PulseResponse, ShowCard } from "../../src/shared/apiTypes";
+import { formatMoneyCompact } from "../../src/domain/money";
 
 interface Dashboard {
   tasks: Task[];
@@ -10,7 +12,8 @@ interface Dashboard {
   briefing: Briefing | null;
   activity: Activity[];
   events: CalendarEvent[];
-  integrations: { claude: boolean; store: "supabase" | "demo"; google: boolean };
+  revos: { pulse: PulseResponse | null; error: string | null } | null;
+  integrations: { claude: boolean; store: "supabase" | "demo"; google: boolean; revos: boolean };
 }
 interface ChatMsg { role: "user" | "assistant"; content: string }
 
@@ -118,10 +121,10 @@ export default function Home() {
           <h1 className="text-2xl font-semibold">Good {hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}</h1>
           {data && (
             <div className="mt-2 flex flex-wrap gap-2 text-xs">
-              {([["Claude", data.integrations.claude], ["Supabase", data.integrations.store === "supabase"], ["Gmail + Calendar", data.integrations.google]] as const).map(([n, on]) => (
+              {([["Claude", data.integrations.claude], ["Supabase", data.integrations.store === "supabase"], ["Gmail + Calendar", data.integrations.google], ["RevOS", data.integrations.revos]] as const).map(([n, on]) => (
                 <span key={n} className="flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-muted">
                   <span className={`h-1.5 w-1.5 rounded-full ${on ? "bg-ok" : "bg-warn"}`} />
-                  {n}{on ? "" : n === "Claude" ? " · not configured" : " · demo"}
+                  {n}{on ? "" : n === "Claude" || n === "RevOS" ? " · not configured" : " · demo"}
                 </span>
               ))}
             </div>
@@ -150,6 +153,8 @@ export default function Home() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
+          {data?.revos && <RevenuePanel revos={data.revos} />}
+
           <Panel title="Daily briefing" action={data?.briefing && <span className="text-xs text-muted">{timeAgo(data.briefing.created_at)}</span>}>
             {data?.briefing ? <Markdown text={data.briefing.content} /> : <p className="text-sm text-muted">No briefing yet. Generate one, or it runs automatically weekday mornings.</p>}
           </Panel>
@@ -276,5 +281,50 @@ export default function Home() {
         </div>
       </div>
     </main>
+  );
+}
+
+function grossLabel(s: ShowCard) {
+  const g = s.revenue?.grossAfterRefunds;
+  if (!s.currency || !g || g.minor === null) return "—";
+  return `${formatMoneyCompact(g.minor, s.currency)}${g.status === "partial" ? "+" : ""}`;
+}
+
+function RevenuePanel({ revos }: { revos: NonNullable<Dashboard["revos"]> }) {
+  const p = revos.pulse;
+  if (!p) return <Panel title="Revenue · RevOS"><p className="text-sm text-danger">Couldn't reach RevOS: {revos.error}</p></Panel>;
+  const upcoming = p.shows.filter((s) => s.phase === "upcoming" || s.phase === "today").slice(0, 6);
+  const gross = p.summary.upcomingGrossByCurrency
+    .map((g) => (g.minor === null ? `— ${g.currency}` : `${formatMoneyCompact(g.minor, g.currency)}${g.status === "partial" ? "+" : ""}`))
+    .join(" · ") || "—";
+  return (
+    <Panel title="Revenue · RevOS" action={p.organization.is_fixture && <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[11px] font-medium text-warn">Sample data</span>}>
+      <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[["Upcoming shows", String(p.summary.upcomingShows)], ["Gross after refunds", gross], ["Paid tickets, 7 days", String(p.summary.paidTicketsLast7Days)], ["Need attention", String(p.summary.showsNeedingAttention)]].map(([label, value]) => (
+          <div key={label}><div className="text-xs text-muted">{label}</div><div className="text-lg font-semibold tabular-nums">{value}</div></div>
+        ))}
+      </div>
+      <ul className="divide-y divide-line">
+        {upcoming.map((s) => {
+          const wk = s.pace?.last7DaysPaidTickets, prev = s.pace?.previous7DaysPaidTickets;
+          return (
+            <li key={s.id} className="flex items-center gap-3 py-2">
+              <span className="w-14 shrink-0 text-xs tabular-nums text-muted">{s.daysUntil === 0 ? "Today" : s.daysUntil === null ? "TBD" : `${s.daysUntil}d`}</span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm">{s.name}</div>
+                <div className="truncate text-xs text-muted">
+                  {s.tickets ? `${s.tickets.paid} paid` : "No sales data"}
+                  {wk !== undefined && ` · ${wk} this week${prev !== undefined ? ` (${wk >= prev ? "+" : ""}${wk - prev} vs last)` : ""}`}
+                  {s.freshness.stale && " · stale"}
+                </div>
+              </div>
+              {s.attention.length > 0 && <span className="shrink-0 text-xs text-warn" title={s.attention.map((a) => a.title).join("\n")}>{s.attention.length} alert{s.attention.length > 1 ? "s" : ""}</span>}
+              <span className="w-16 shrink-0 text-right text-sm tabular-nums">{grossLabel(s)}</span>
+            </li>
+          );
+        })}
+        {upcoming.length === 0 && <li className="py-2 text-sm text-muted">No upcoming shows.</li>}
+      </ul>
+    </Panel>
   );
 }

@@ -3,6 +3,7 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { createEvent, listEvents } from "./calendar";
 import { createReplyDraft, getEmail, gmailConfigured, searchEmail } from "./gmail";
+import { getPulse, getShow, revosConfigured, summarizePulse } from "./revos";
 import { getStore } from "./store";
 
 const client = new Anthropic();
@@ -17,6 +18,7 @@ Your job: keep their inbox triaged, their commitments tracked, and their day cle
 - Drafts: when a reply is needed, write it in ${name}'s voice (warm, brief, decisive) and save it with draft_reply. You can only create drafts; ${name} reviews and sends them. Never claim an email was sent.
 - Tasks: when an email or conversation contains a commitment or deadline, create a task with a due date. Check list_tasks first so you don't duplicate one.
 - Calendar: check list_events before proposing times, and prefer gaps that keep focus blocks intact. Only add events with create_event when ${name} asks for it, and send invites to other people only when ${name} explicitly says to.
+- Revenue: RevOS (revos_pulse, revos_show) is the source of truth for ticket sales, revenue, pace, targets and which marketing is driving sales. Money values are integer minor units (cents) with a currency: divide by 100 for USD-style currencies, never add different currencies, and treat null as unknown, not zero. Say "gross after refunds", never "net revenue". If a measure is partial or data is stale, say so. If the organization is fixture data, say the numbers are sample data.
 - Be concise. Lead with what needs ${name}'s decision. Use short markdown lists.
 Now: ${new Date().toISOString()} (UTC).${process.env.EXEC_TIMEZONE ? ` ${name}'s time zone is ${process.env.EXEC_TIMEZONE}; give times in it and write event times with its UTC offset.` : ""}`;
 }
@@ -91,6 +93,23 @@ const tools = () => {
         return JSON.stringify(ev);
       },
     }),
+    ...(revosConfigured() ? [
+      betaZodTool({
+        name: "revos_pulse",
+        description: "RevOS overview: upcoming shows with paid tickets, gross after refunds, 7-day pace vs the previous 7 days, targets, top marketing drivers and items needing attention.",
+        inputSchema: z.object({}),
+        run: async () => JSON.stringify(summarizePulse(await getPulse())),
+      }),
+      betaZodTool({
+        name: "revos_show",
+        description: "RevOS detail for one show (id from revos_pulse): revenue breakdown, ticket classes, marketing drivers, sync history.",
+        inputSchema: z.object({ id: z.string() }),
+        run: async ({ id }) => {
+          const { event, card, ticketClasses } = await getShow(id);
+          return JSON.stringify({ card, revenue: event.revenue, marketing: event.marketing, marketingLast7Days: event.marketingLast7Days, ticketClasses, freshness: event.freshness });
+        },
+      }),
+    ] : []),
     betaZodTool({
       name: "list_tasks",
       description: "List tasks. status 'active' = open + waiting.",
@@ -157,7 +176,7 @@ export async function runTriage(): Promise<string> {
 export async function runBriefing(): Promise<string> {
   const text = await runAssistant([{
     role: "user",
-    content: "Write my daily briefing. First triage new inbox mail (in:inbox newer_than:1d), check my active tasks, and list today's and tomorrow's calendar events. Then write the briefing in markdown with sections: **Top 3 priorities today**, **Schedule** (today's meetings with a one-line prep note each, and conflicts or back-to-backs), **Decisions needed**, **Overdue / due soon**, **Inbox** (urgent items + drafts waiting for my review). Keep it under 250 words. Output only the briefing.",
+    content: "Write my daily briefing. First triage new inbox mail (in:inbox newer_than:1d), check my active tasks, list today's and tomorrow's calendar events, and (if the revos_pulse tool is available) check RevOS. Then write the briefing in markdown with sections: **Top 3 priorities today**, **Schedule** (today's meetings with a one-line prep note each, and conflicts or back-to-backs), **Decisions needed**, **Revenue** (only if RevOS is available: shows in the next 14 days, ticket pace this week vs last, anything behind target or needing attention), **Overdue / due soon**, **Inbox** (urgent items + drafts waiting for my review). Keep it under 250 words. Output only the briefing.",
   }]);
   const store = getStore();
   await store.saveBriefing(text);
