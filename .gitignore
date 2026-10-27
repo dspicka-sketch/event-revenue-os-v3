@@ -1,5 +1,8 @@
-node_modules
-.next
-.env*.local
-next-env.d.ts
-*.tsbuildinfo
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+reports/
