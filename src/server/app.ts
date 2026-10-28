@@ -1,8 +1,11 @@
 // HTTP API shared by the desktop web client and the mobile client. Every
 // tenant route checks the caller's membership in the organization in the path.
 
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { aiActionFor, AiError, createTextGeneratorFromEnv, type TextGenerator } from "../ai/gemini.js";
+import { buildInsightPrompt } from "../ai/insightPrompt.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyCors from "@fastify/cors";
@@ -19,7 +22,8 @@ import { defaultMarketingAdapterFactory, syncMarketingConnection, type Marketing
 import { MEASURE_DEFINITIONS } from "../domain/revenue.js";
 import { actionFor, ProviderError } from "../providers/errors.js";
 import type {
-  ConnectionsResponse, EventDetailResponse, EventDto, EventsResponse, LoginResponse, MeResponse, Organization, PulseResponse, RefreshResponse,
+  ConnectionsResponse, EventDetailResponse, EventDto, EventsResponse, InsightAvailability, LoginResponse, MeResponse, Organization, PulseResponse, RefreshResponse,
+  ShowInsightResponse,
 } from "../shared/apiTypes.js";
 import { syncEvent, type AdapterFactory, defaultAdapterFactory } from "../sync/syncEvent.js";
 
@@ -63,6 +67,11 @@ export interface AppOptions {
   corsOrigins?: string[];
   /** Minimum seconds between refreshes of one show (protects vendor rate limits). Default 60. */
   refreshCooldownSeconds?: number;
+  /**
+   * Writer of AI summaries (D17). Omit to build one from GEMINI_API_KEY in the
+   * server environment; pass null to run without the feature.
+   */
+  textGenerator?: TextGenerator | null;
 }
 
 declare module "fastify" {
@@ -160,6 +169,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   }
   const now = opts.now ?? (() => new Date());
   const throttle = new LoginThrottle();
+
+  // ---- AI summaries (D17). Optional; nothing else depends on it.
+  const ai = opts.textGenerator === undefined ? createTextGeneratorFromEnv() : opts.textGenerator;
+  const insightInfo: InsightAvailability = { available: ai !== null, provider: ai?.provider ?? null, model: ai?.model ?? null };
+  // Reuse the last text for identical figures so repeated clicks don't bill again.
+  // Memory only, bounded, lost on restart; nothing generated is stored in the DB.
+  const insightCache = new Map<string, { text: string; model: string; generatedAt: string }>();
+  const INSIGHT_CACHE_MAX = 200;
 
   if (opts.corsOrigins?.length) {
     // Bearer tokens only (no cookies), so credentials mode is not needed.
@@ -264,7 +281,41 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       syncRuns: (await listSyncRuns(db, org.id, eventId)) as unknown as EventDetailResponse["syncRuns"],
       ticketClasses: await ticketClassBreakdown(db, org.id, eventId),
       definitions: MEASURE_DEFINITIONS,
+      insight: insightInfo,
     } satisfies EventDetailResponse;
+  });
+
+  /**
+   * AI-written description of one show's figures (D17). POST because each call
+   * may bill the provider. Members only; the model sees aggregates, never patron
+   * data, and its text is returned next to exactly what it was given.
+   */
+  app.post<{ Params: { orgId: string; eventId: string } }>("/api/orgs/:orgId/events/:eventId/insight", async (req, reply) => {
+    const org = await orgFor(req, reply);
+    if (!org) return;
+    const { eventId } = req.params;
+    const row = UUID.test(eventId) ? await getEventSummary(db, org.id, eventId) : null;
+    if (!row) return reply.code(404).send({ error: "not_found" });
+    const event = eventDto(row, targetsFor(await listTargets(db, org.id), eventId), await marketingFor(org.id, row));
+    const base = { provider: ai?.provider ?? null, model: ai?.model ?? null, dataAsOf: event.freshness.dataAsOf, fixture: org.is_fixture };
+    if (!ai) return { configured: false, text: null, basis: null, generatedAt: null, cached: false, ...base } satisfies ShowInsightResponse;
+    const card = buildShowCard(showInput(event), now());
+    const { system, prompt, basis } = buildInsightPrompt(card, event.marketing, event.marketingLast7Days);
+    const key = createHash("sha256").update(`${ai.provider}\n${ai.model}\n${system}\n${prompt}`).digest("hex");
+    const hit = insightCache.get(key);
+    if (hit) return { configured: true, ...base, ...hit, basis, cached: true } satisfies ShowInsightResponse;
+    try {
+      const out = await ai.generate({ system, prompt });
+      const entry = { text: out.text, model: out.model, generatedAt: now().toISOString() };
+      if (insightCache.size >= INSIGHT_CACHE_MAX) insightCache.delete(insightCache.keys().next().value!);
+      insightCache.set(key, entry);
+      return { configured: true, ...base, ...entry, basis, cached: false } satisfies ShowInsightResponse;
+    } catch (err) {
+      const kind = err instanceof AiError ? err.kind : "upstream";
+      const message = err instanceof Error ? err.message : String(err);
+      req.log.warn({ kind }, "AI summary failed");
+      return reply.code(kind === "rate_limited" ? 429 : 502).send({ error: "ai_unavailable", kind, message, action: aiActionFor(kind) });
+    }
   });
 
   app.post<{ Params: { orgId: string; eventId: string } }>("/api/orgs/:orgId/events/:eventId/refresh", async (req, reply) => {
