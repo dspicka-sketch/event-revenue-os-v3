@@ -12,6 +12,7 @@ Updated 2026-10-21: marketing effectiveness is the lead (D13), and Prism.fm repl
 | M4 | Klaviyo / Laylo | SMS and fan-engagement campaigns joined by the same tracking-link codes | Live read | Not started |
 | M5 | WordPress + GA4 | Funnel from the event page to checkout; validate cross-domain tracking | Live read + validated tracking | Not started |
 | M6 | Ticket Evolution | Resale reconciliation under a documented commercial arrangement | Live read; primary and resale reconcile without double counting | Not started (commercial access required) |
+| — | Gemini AI summaries (D17) | Optional per-show plain-language summary of computed figures; server-side `@google/genai`, key in server env, aggregates only | One live summary on a fixture show with a real key | Built (desktop + API, fake-client tests); **live gate BLOCKED** (network policy) |
 | — | Airtable | Optional planning fallback if Prism.fm access is not available | — | Deprioritized (D14) |
 
 The original target vendors (On The Stage, Laylo, Prism.fm, Prolific 1) remain behind the same connector boundary. They can be added once access exists.

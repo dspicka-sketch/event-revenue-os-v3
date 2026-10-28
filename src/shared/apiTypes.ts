@@ -71,6 +71,34 @@ export interface EventDetailResponse {
   syncRuns: SyncRun[];
   ticketClasses: { ticket_class_name: string | null; currency: string; status: string; quantity: number; gross_minor: number | null; unknown_gross: number }[];
   definitions: Record<string, { label: string; definition: string }>;
+  /** Whether "Summarize with AI" is offered for this show (D17). */
+  insight: InsightAvailability;
+}
+
+/** Whether the server can write AI summaries (D17). Never carries the key, only its presence. */
+export interface InsightAvailability {
+  available: boolean;
+  provider: "gemini" | null;
+  model: string | null;
+}
+
+/**
+ * An AI-written description of one show's figures (D17). `text` is narrative
+ * for people to read; clients label it as AI-generated and never parse it into
+ * money or counts. `basis` is exactly what the model was given.
+ */
+export interface ShowInsightResponse {
+  configured: boolean;
+  provider: "gemini" | null;
+  model: string | null;
+  text: string | null;
+  basis: string | null;
+  generatedAt: string | null;
+  /** True when the same figures were summarized before and the earlier text was reused. */
+  cached: boolean;
+  /** The data snapshot the figures came from. */
+  dataAsOf: string | null;
+  fixture: boolean;
 }
 
 export interface PulseResponse extends OrgPulse {

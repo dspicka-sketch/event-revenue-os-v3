@@ -1,6 +1,6 @@
 // Browser API client. Talks only to the RevOS server; never to vendor APIs.
 import type {
-  ConnectionsResponse, EventDetailResponse, EventsResponse, LoginResponse, MeResponse, PulseResponse, RefreshResponse, TargetRequest,
+  ConnectionsResponse, EventDetailResponse, EventsResponse, LoginResponse, MeResponse, PulseResponse, RefreshResponse, ShowInsightResponse, TargetRequest,
 } from "../shared/apiTypes.js";
 
 export type * from "../shared/apiTypes.js";
@@ -40,6 +40,7 @@ export const api = {
   events: (orgId: string) => call<EventsResponse>(`/api/orgs/${orgId}/events`),
   event: (orgId: string, eventId: string) => call<EventDetailResponse>(`/api/orgs/${orgId}/events/${eventId}`),
   refresh: (orgId: string, eventId: string) => call<RefreshResponse>(`/api/orgs/${orgId}/events/${eventId}/refresh`, { method: "POST" }),
+  insight: (orgId: string, eventId: string) => call<ShowInsightResponse>(`/api/orgs/${orgId}/events/${eventId}/insight`, { method: "POST" }),
   setTarget: (orgId: string, eventId: string, t: TargetRequest) => call<{ ok: true }>(`/api/orgs/${orgId}/events/${eventId}/targets`, json("PUT", t)),
   deleteTarget: (orgId: string, eventId: string, measure: string) => call<{ ok: true }>(`/api/orgs/${orgId}/events/${eventId}/targets/${measure}`, { method: "DELETE" }),
   setTrackingLink: (orgId: string, code: string, label: string | null, channel: string | null) =>

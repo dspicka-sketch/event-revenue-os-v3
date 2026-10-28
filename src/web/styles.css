@@ -218,3 +218,9 @@ tr.group-row th { background: var(--bg); font-size: 0.8rem; text-transform: uppe
 .spend-form input { width: 7em; }
 .warn-callout { background: var(--warn-bg); color: var(--warn-fg); margin: 12px 0 0; padding: 8px 12px; }
 .marketing table.data tbody th { min-width: 13em; }
+
+/* AI summary (D17) */
+.insight .ai-text { white-space: pre-wrap; line-height: 1.5; margin: 8px 0; }
+.insight details { margin-top: 8px; }
+.insight summary { cursor: pointer; color: var(--muted); }
+.insight .basis { white-space: pre-wrap; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin: 8px 0 0; overflow-x: auto; }

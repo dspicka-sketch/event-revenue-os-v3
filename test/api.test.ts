@@ -6,7 +6,8 @@ import { createConnection, createMappedEvent, createOrganization } from "../src/
 import { buildApp } from "../src/server/app.js";
 import { EventbriteAdapter } from "../src/providers/eventbrite/adapter.js";
 import { createFixtureTransport, pilotFixture, type FixtureFailure } from "../src/providers/eventbrite/fixtures.js";
-import type { EventDetailResponse, PulseResponse } from "../src/shared/apiTypes.js";
+import type { EventDetailResponse, PulseResponse, ShowInsightResponse } from "../src/shared/apiTypes.js";
+import { AiError } from "../src/ai/gemini.js";
 import { describeDb, freshDb } from "./helpers/db.js";
 
 describeDb("HTTP API", () => {
@@ -244,5 +245,59 @@ describeDb("HTTP API", () => {
 
   it("returns 404 for malformed IDs", async () => {
     expect((await app.inject({ url: `/api/orgs/nope/events`, headers: admin })).statusCode).toBe(404);
+  });
+
+  it("writes an AI summary from the show's figures for members, reusing it for identical figures", async () => {
+    const seen: { system: string; prompt: string }[] = [];
+    const withAi = await buildApp({
+      db, refreshCooldownSeconds: 0, now: () => new Date("2026-10-20T19:00:00Z"),
+      textGenerator: {
+        provider: "gemini", model: "gemini-test",
+        async generate(req) { seen.push(req); return { text: "Half of the tickets came through the launch email.", model: "gemini-test-001" }; },
+      },
+    });
+    const detail = await withAi.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: viewer });
+    expect(detail.json<EventDetailResponse>().insight).toEqual({ available: true, provider: "gemini", model: "gemini-test" });
+
+    const url = `/api/orgs/${orgId}/events/${eventId}/insight`;
+    const first = await withAi.inject({ method: "POST", url, headers: viewer });
+    expect(first.statusCode).toBe(200);
+    const body = first.json<ShowInsightResponse>();
+    expect(body).toMatchObject({ configured: true, provider: "gemini", model: "gemini-test-001", text: "Half of the tickets came through the launch email.", cached: false, fixture: true });
+    expect(body.basis).toContain("Show: ");
+    expect(body.basis).toContain("FIXTURE DATA");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.prompt).toContain(body.basis!);
+    // Nothing patron-level reaches the model.
+    expect(seen[0]!.prompt).not.toMatch(/@/);
+
+    const again = await withAi.inject({ method: "POST", url, headers: viewer });
+    expect(again.json<ShowInsightResponse>()).toMatchObject({ cached: true, text: body.text });
+    expect(seen).toHaveLength(1);
+
+    // Non-members get 404, like every tenant route.
+    expect((await withAi.inject({ method: "POST", url: `/api/orgs/${liveOrgId}/events/${eventId}/insight`, headers: viewer })).statusCode).toBe(404);
+    await withAi.close();
+  });
+
+  it("reports AI summaries as not configured when there is no key", async () => {
+    const without = await buildApp({ db, now: () => new Date("2026-10-20T19:00:00Z"), textGenerator: null });
+    expect((await without.inject({ url: `/api/orgs/${orgId}/events/${eventId}`, headers: viewer })).json<EventDetailResponse>().insight).toEqual({ available: false, provider: null, model: null });
+    const r = await without.inject({ method: "POST", url: `/api/orgs/${orgId}/events/${eventId}/insight`, headers: viewer });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ configured: false, text: null, basis: null, provider: null });
+    await without.close();
+  });
+
+  it("returns a provider failure as 502/429 with an action", async () => {
+    const failing = await buildApp({
+      db, now: () => new Date("2026-10-20T19:00:00Z"),
+      textGenerator: { provider: "gemini", model: "gemini-test", async generate() { throw new AiError("auth", "The Gemini API rejected the credential (HTTP 403)."); } },
+    });
+    const r = await failing.inject({ method: "POST", url: `/api/orgs/${orgId}/events/${eventId}/insight`, headers: viewer });
+    expect(r.statusCode).toBe(502);
+    expect(r.json()).toMatchObject({ error: "ai_unavailable", kind: "auth" });
+    expect(String(r.json().action)).toContain("GEMINI_API_KEY");
+    await failing.close();
   });
 });

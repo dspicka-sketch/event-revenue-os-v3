@@ -5,7 +5,7 @@ import { CHANNEL_LABELS, CHANNELS, type Channel, type MoneyByCurrency } from "..
 import { TARGET_LABELS, type AttentionItem, type ShowCard, type TargetProgress } from "../domain/pulse.js";
 import {
   api, ApiError, getToken, setToken,
-  type ConnectionsResponse, type EventDetailResponse, type MarketingSummary, type OrgMarketing, type EventDto, type MeResponse, type Organization, type PulseResponse, type TargetMeasure,
+  type ConnectionsResponse, type EventDetailResponse, type MarketingSummary, type OrgMarketing, type EventDto, type MeResponse, type Organization, type PulseResponse, type ShowInsightResponse, type TargetMeasure,
 } from "./api.js";
 import { fmtDateTime, fmtMeasure, fmtRelative, formatMoney } from "./format.js";
 import { PaceChart } from "./PaceChart.js";
@@ -425,6 +425,8 @@ function EventPage({ org, eventId, go, onAuth }: { org: Organization; eventId: s
           onSpend={org.role === "admin" ? async (code, currency, minor) => { await api.setSpend(org.id, eventId, code, currency, minor); reload(); } : undefined} />
       )}
 
+      {e.marketing && <InsightPanel org={org} eventId={eventId} info={data.insight} dataAsOf={e.freshness.dataAsOf} />}
+
       <SyncStatus e={e} tz={tz} />
 
       <div className="two-col">
@@ -446,6 +448,62 @@ function EventPage({ org, eventId, go, onAuth }: { org: Organization; eventId: s
       {e.revenue && <Exceptions list={e.revenue.exceptions} />}
       <TicketClasses rows={data.ticketClasses} />
       <SyncHistory runs={data.syncRuns} tz={tz} />
+    </section>
+  );
+}
+
+/**
+ * "Summarize with AI" (D17): a few plain sentences written by the server's text
+ * generator from the figures on this page. Labeled as AI-generated; never a
+ * source of record. Hidden when the server has no key.
+ */
+function InsightPanel({ org, eventId, info, dataAsOf }: { org: Organization; eventId: string; info: EventDetailResponse["insight"]; dataAsOf: string | null }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ShowInsightResponse | null>(null);
+  const [error, setError] = useState<{ title: string; action?: string } | null>(null);
+  useEffect(() => { setResult(null); setError(null); }, [eventId, dataAsOf]);
+  if (!info.available) return null;
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.insight(org.id, eventId));
+    } catch (e) {
+      const body = e instanceof ApiError ? e.body : {};
+      setError({ title: `No summary: ${String(body.message ?? (e as Error).message)}`, action: typeof body.action === "string" ? body.action : undefined });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="card insight" aria-labelledby="ai-h">
+      <div className="card-title-row">
+        <h2 id="ai-h" className="card-title">AI summary <span className="tag neutral">AI-generated</span></h2>
+        <button className="secondary" onClick={run} disabled={busy} aria-busy={busy}>{busy ? "Writing…" : result ? "Summarize again" : "Summarize with AI"}</button>
+      </div>
+      <p className="small muted">
+        Written by {info.provider === "gemini" ? "Google Gemini" : "an AI model"} ({info.model}) from the figures on this page only.
+        It describes the numbers; it is not a source of record. Check anything it says against the tables.
+      </p>
+      <div aria-live="polite">
+        {error && <ErrorBox title={error.title} action={error.action} />}
+        {result?.configured && result.text && (
+          <>
+            <p className="ai-text">{result.text}</p>
+            <p className="small muted">
+              Model {result.model} · generated {fmtRelative(result.generatedAt)}{result.cached ? " (same figures as before, so the earlier text was reused)" : ""}
+              {result.fixture ? " · fixture data" : ""}
+            </p>
+            <details>
+              <summary className="small">Figures sent to the model</summary>
+              <pre className="basis">{result.basis}</pre>
+            </details>
+          </>
+        )}
+        {result && !result.configured && <p className="muted">AI summaries are not configured on this server.</p>}
+      </div>
     </section>
   );
 }

@@ -17,6 +17,7 @@ Both clients share the **same** server API (`src/server/`), database, integratio
 
 ```
 src/domain/     Pure money, revenue, reconciliation and show-card/attention rules (no I/O)
+src/ai/         Gemini text generation (server only): prompt from computed figures, AI narrative out (D17)
 src/providers/  Vendor adapters (read-only). One folder per vendor.
 src/db/         SQL migrations (forward-only), pool, repository. Every tenant query takes organization_id.
 src/auth/       Users, memberships (admin/viewer), sessions, password hashing
