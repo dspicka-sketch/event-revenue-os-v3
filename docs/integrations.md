@@ -4,6 +4,24 @@ Status key: **CONFIRMED-DOC** = seen in an Eventbrite-published source · **SECO
 
 A fixture test passing is not live verification.
 
+## On The Stage (owner's ticketing platform, D18)
+
+Research conditions (2026-10-28): `onthestage.com` and `www.onthestage.com` are blocked by this environment's network policy, so only search-engine results and third-party listings were read. Nothing below is from On The Stage's own documentation.
+
+| Item | Value | Status |
+|---|---|---|
+| Public API / developer program | None found | NOT FOUND (search) |
+| Promo codes | Per production, event or ticket type, with limits; a direct link to a performance with the code prefilled at checkout | SECONDHAND (marketing page excerpt) |
+| Marketing integrations | Google Analytics, Meta Pixel on their pages; Mailchimp and Zapier named by a third-party listing | SECONDHAND |
+| Reports / export | Unknown. The dashboard login exists; whether an orders or sales export is available, its columns, and whether it carries the promo code per order are the open questions | UNKNOWN |
+
+**Questions for On The Stage support (Daniel to send):**
+1. Is there an API, webhooks or a Zapier trigger with read access to orders, tickets and performances for my account?
+2. If not, which orders or sales reports can I export, with which columns, and can an export be scheduled or fetched by link?
+3. Does the per-order data include the promo code used, and the ticket price, fees and tax as separate amounts?
+
+**What is built regardless (ASSUMED layout):** `src/providers/onthestage/importReport.ts` parses a CSV export through an explicit column mapping into the normalized orders and lines. The sample headers used in `test/onthestage-import.test.ts` are placeholders until the real export is seen. Any row whose money cannot be parsed is reported, not guessed; a missing column is unknown, never zero. Imported data can never be `verified`.
+
 ## Eventbrite (M1, read-only)
 
 ### Research conditions (2026-10-20)

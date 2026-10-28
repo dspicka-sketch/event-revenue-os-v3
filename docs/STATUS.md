@@ -92,8 +92,14 @@ Not verified: the app on a physical iPhone or Android phone, or in a simulator. 
 - Public hosting needs HTTPS, a shared login throttle and password reset by email.
 - Mobile: on-device test, app icon/splash, push notifications and store distribution are not done.
 
+## Sprint 1: On The Stage data path (D18, 2026-10-28, in progress)
+- Decision recorded (D18): On The Stage is the owner's ticketing platform; Eventbrite becomes the reference adapter.
+- Built: `src/providers/onthestage/importReport.ts`, a format-agnostic CSV import core (parser + explicit column mapping + normalization to the existing orders and lines, promo code as tracking code, decimal money to integer minor units, missing = unknown). Tested against an ASSUMED sample layout only.
+- Not built until On The Stage answers: the adapter or the import connection mode (schema), API route, UI labeling.
+
 ## Next actions for Daniel
-0. **Ask Prism.fm for API access** (documentation, auth and terms) for deals, budgets and settlements. This blocks M3.
+0. **Send On The Stage the three questions** in `docs/integrations.md` and, from your dashboard, **export one orders or sales report** for a recent production and send me its column headers (not the rows). That unblocks Sprint 1.
+0b. **Ask Prism.fm for API access** (documentation, auth and terms) for deals, budgets and settlements. This blocks M3.
 
 1. **Run the live Eventbrite read** on your own machine. Start with `npm run probe:eventbrite` and send the developer the `reports/eventbrite-probe-*.md` file it writes (it contains no customer data). Then follow README → Live setup. Alternatively, allow `www.eventbriteapi.com` in this environment's network settings and add the token as an environment secret.
 2. **Enable AI summaries (optional):** create a Gemini API key, set `GEMINI_API_KEY` in your `.env` (or host secrets), and press **Summarize with AI** on a fixture show once. That is the live gate for D17.
