@@ -88,7 +88,7 @@ Daniel asked for a Gemini API integration (branch `gemini-api-integration`, Goog
 - **Failure.** Any provider error leaves the page's figures untouched and shows an error with an action; without a key the feature is hidden and the API answers `configured: false`.
 - **Not done:** live verification (this environment cannot reach `generativelanguage.googleapis.com`), a mobile panel, and summaries at the organization level.
 
-## D18 — On The Stage is the owner's ticketing platform (2026-10-28; PROPOSED pending portfolio escalation E-003)
+## D18 — On The Stage is the owner's ticketing platform (adopted 2026-10-28, portfolio escalation E-003)
 Daniel confirmed that his real ticket sales run through **On The Stage**, not Eventbrite. He has an account login and no API key.
 - **Order of work changes.** Getting data out of On The Stage is now the critical path to the MVP and becomes Sprint 1. The Eventbrite adapter stays as the reference implementation and as the path for a second venue that sells on Eventbrite; its live gate (M1) is no longer the first milestone. Everything above the adapter (money, reconciliation, attribution, show cards, API, both clients, Mailchimp, AI summaries) is unchanged.
 - **No public API found** (search only; `onthestage.com` is blocked from this environment). Their site advertises promo codes with prefilled checkout links, Google Analytics and Meta Pixel; third-party listings mention Mailchimp and Zapier. Until On The Stage answers, nothing claims an endpoint exists.
