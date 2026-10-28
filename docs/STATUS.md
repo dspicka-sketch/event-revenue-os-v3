@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (see ROADMAP.md). Live verification: BLOCKED._
+_Last updated: 2026-10-28. Scope: desktop web app + mobile app on one backend (see ROADMAP.md). Live verification: BLOCKED._
 
 ## Completed
 
@@ -51,6 +51,22 @@ After reviewing the demo, Daniel chose marketing effectiveness as RevOS's lead (
 - Admins can enter spend per source per show; the To date view shows cost per paid ticket, and sources with spend but no sales still appear.
 - Fixture: Facebook ads $300 / $150, plus a TikTok promo with $120 spend and no sales.
 
+### AI summaries through Gemini (D17, 2026-10-28; live gate BLOCKED)
+- `src/ai/gemini.ts`: server-side wrapper over the official `@google/genai` SDK (the Node form of the `google-genai` quickstart). Key from `GEMINI_API_KEY` only; `GEMINI_MODEL` optional (default `gemini-flash-latest`). 20 s timeout, no SDK retries, typed errors with a user action.
+- `src/ai/insightPrompt.ts`: pure prompt builder. Renders the show card, both marketing views, targets and attention items into plain text; money through the shared formatter; no patron data. The same text is returned as `basis`.
+- API: `POST /api/orgs/:orgId/events/:eventId/insight` (members; 404 for non-members) returns the narrative, the basis, the model version and the data snapshot, or `configured: false` without a key; provider failures are 502 with a kind and action. The show detail response carries `insight.available`.
+- Desktop: an "AI summary" card under "What's driving sales" with one button, the generated text labeled as AI-generated and not a source of record, and a collapsible "Figures sent to the model". Hidden when not configured. Mobile: not yet.
+- Tests: prompt content and privacy (no order/ticket fields), generator behavior with a fake client (text, blocked, truncated, rate limited, not configured), API route (configured and unconfigured, member check, cache reuse), and a dependency-boundary check that `@google/genai` is imported only under `src/ai/`.
+
+## Verification actually performed (2026-10-28, Gemini branch)
+
+| Check | Result |
+|---|---|
+| `npm run check` (local PostgreSQL 16 in the cloud container) | typecheck OK; **120/120 tests** passed (12 new: prompt builder, generator with a fake client, API route, dependency boundary); web build OK; secret/PII scan clean |
+| Mobile `npm run typecheck` / `npm test` | OK / 6/6 passed (API types gained `insight`; mobile ignores it) |
+| Desktop manual run (Playwright, 1280 px and 390 px) | Fixture show with a placeholder key: the AI summary card renders, the button calls the API, the provider failure shows as a red callout with an action, and the figures stay. Success state checked with a stubbed response: text, model line and the "Figures sent to the model" details render. No horizontal overflow at 390 px |
+| Live Gemini call | **NOT performed.** The container cannot reach `generativelanguage.googleapis.com` and holds no key |
+
 ## Verification actually performed (2026-10-21)
 
 | Check | Result |
@@ -66,6 +82,7 @@ Not verified: the app on a physical iPhone or Android phone, or in a simulator. 
 ## BLOCKED
 
 - **Live Eventbrite read:** no credentials were supplied, and this cloud environment's network policy denies `www.eventbriteapi.com` / `www.eventbrite.com`. Every ASSUMED/SECONDHAND item in `docs/integrations.md` is still unverified, and live organizer proceeds stay Unavailable by design.
+- **Live Gemini call:** `generativelanguage.googleapis.com` and `ai.google.dev` are denied here (HTTP 403 from the proxy) and no `GEMINI_API_KEY` exists in this environment. The integration is verified only against a fake client. Exact next step: on a machine with network access, put a key in `.env` as `GEMINI_API_KEY`, start the server, open a fixture show and press **Summarize with AI** once; then record the model version shown and move the integrations.md row to LIVE-VERIFIED.
 - **Expo docs:** `docs.expo.dev` is also denied here. Mobile APIs were checked against the installed package type definitions (tsc) and real bundle exports instead.
 
 ## Unresolved gaps
@@ -79,4 +96,5 @@ Not verified: the app on a physical iPhone or Android phone, or in a simulator. 
 0. **Ask Prism.fm for API access** (documentation, auth and terms) for deals, budgets and settlements. This blocks M3.
 
 1. **Run the live Eventbrite read** on your own machine. Start with `npm run probe:eventbrite` and send the developer the `reports/eventbrite-probe-*.md` file it writes (it contains no customer data). Then follow README → Live setup. Alternatively, allow `www.eventbriteapi.com` in this environment's network settings and add the token as an environment secret.
-2. **Try the mobile app** on your phone: `HOST=0.0.0.0 npm start` at the repo root, then `cd mobile && npx expo start` and open it in Expo Go.
+2. **Enable AI summaries (optional):** create a Gemini API key, set `GEMINI_API_KEY` in your `.env` (or host secrets), and press **Summarize with AI** on a fixture show once. That is the live gate for D17.
+3. **Try the mobile app** on your phone: `HOST=0.0.0.0 npm start` at the repo root, then `cd mobile && npx expo start` and open it in Expo Go.

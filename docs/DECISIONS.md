@@ -78,5 +78,15 @@ Daniel confirmed that the ticket buyer typically pays the platform fee, processi
 - **Spend:** admins may enter what a source cost for a show (per tracking code, per currency). It is an expense input, never revenue, never added across currencies, and only shown in the to-date view, where cost per paid ticket = spend ÷ attributed paid tickets (integer minor units, rounded half up). A source with spend and no attributed sales still appears, with no cost per ticket. Ad-platform spend connectors (Meta, Google) would replace manual entry later; not on the roadmap yet.
 - Entered spend is a deviation from "read-only integrations" only in that RevOS stores a number the user typed. Nothing is written to any vendor.
 
+## D17 — AI summaries through the Gemini API (2026-10-28)
+Daniel asked for a Gemini API integration (branch `gemini-api-integration`, Google's `generate_content` quickstart). RevOS uses it for one thing: an optional, on-demand plain-language summary of a show's figures, so an operator can read "what's driving sales" in a few sentences.
+- **Server only.** `src/ai/gemini.ts` wraps the official `@google/genai` SDK (the Node counterpart of `google-genai`). The key is `GEMINI_API_KEY` in the server environment; the database, API responses and logs carry at most "configured: yes/no". Clients never call Google. The SDK is imported only under `src/ai/` (a test enforces this).
+- **Figures in, words out.** `src/ai/insightPrompt.ts` renders the `ShowCard` and marketing summaries that `src/domain/` already computed into plain text (`basis`), with money formatted by the shared money module. The model is told to quote figures, never compute new ones, never treat opens or clicks as attribution, and to call unavailable figures unavailable. Its text is returned next to the exact `basis` it was given, labeled as AI-generated in the client. **The narrative is never a source of truth** and is never parsed back into money or counts.
+- **Privacy.** Only aggregates reach Google: show name, dates, counts, money totals, campaign titles, tracking-link labels and attention items. No orders, tickets, names, emails, phones or barcodes.
+- **Spend containment.** One request per member click (`POST /api/orgs/:orgId/events/:eventId/insight`), no background or scheduled calls, no SDK retries, a 20 s timeout, and a bounded in-memory reuse of the last text for identical figures. Nothing generated is stored in the database.
+- **Model.** Default `gemini-flash-latest`, which is a floating alias that Google moves to newer Flash releases; `GEMINI_MODEL` pins a version. The model version actually used is reported with each summary.
+- **Failure.** Any provider error leaves the page's figures untouched and shows an error with an action; without a key the feature is hidden and the API answers `configured: false`.
+- **Not done:** live verification (this environment cannot reach `generativelanguage.googleapis.com`), a mobile panel, and summaries at the organization level.
+
 ## Proposed (not done)
 - A `financial_adjustments` table, deferred until a source exposes explicit refund/adjustment amounts. In M1, refunds come from order/line state.

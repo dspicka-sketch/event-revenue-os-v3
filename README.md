@@ -16,6 +16,7 @@ Node.js 22 + TypeScript, Fastify (server API), PostgreSQL 16 (plain SQL migratio
 ```
 src/domain/        Money, revenue, show-card and attention rules (pure; shared by server, web and mobile)
 src/shared/        API contract types shared by server, web and mobile
+src/ai/            Gemini AI summaries (server only, optional; D17)
 src/auth/          Users, org memberships, sessions
 src/providers/     Vendor adapters (Eventbrite: client, normalization, fixtures)
 src/db/            Migrations, connection pool, repository (all queries scoped to an organization)
@@ -68,6 +69,12 @@ npm run check:mobile            # mobile typecheck + tests
    Then run `npm run reconcile:compare -- <orgId> <eventId> report.json`. The result appears in the event's reconciliation table. Any unexplained difference must be investigated before the connection counts as reconciled.
 
 Only after step 6 shows zero unexplained difference should fee ownership be recorded and `proceeds_policy` changed from `unverified`. Until then, organizer proceeds stay **Unavailable** on live data, by design.
+
+## AI summaries (Gemini, optional)
+
+A show page can offer **Summarize with AI**: a 3 to 5 sentence plain-language description of the show's figures (tickets, pace, targets and which marketing sources are linked to sales), written by Google's Gemini API from the numbers RevOS already computed. The model receives aggregates only, never patron data, and its text is labeled as AI-generated: it is not a source of record and is never parsed back into figures.
+
+To enable it, set `GEMINI_API_KEY` in the server environment (`.env` locally, or your host's secret manager) and optionally `GEMINI_MODEL` (default `gemini-flash-latest`). Without the key the feature is hidden and the API reports `configured: false`. See `docs/DECISIONS.md` D17 and `docs/integrations.md`.
 
 ## Accounts and access
 

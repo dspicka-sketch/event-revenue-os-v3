@@ -121,6 +121,22 @@ Research conditions: `mailchimp.com` is blocked by this environment's network po
 | Not used | Mailchimp e-commerce "attributed revenue", list/member/email-activity endpoints (subscriber-level personal data) | Policy |
 | Clicks semantics | Unique clicks are summed per distinct link to the same show; one person clicking two links counts twice. Labeled "per 100 clicks" | Implementation |
 
+## Gemini API (AI summaries, D17; outbound third-party processor)
+
+Unlike the connectors above, Gemini is not a data source. RevOS **sends** it aggregate figures and receives text. Research conditions: `generativelanguage.googleapis.com` and `ai.google.dev` are blocked by this environment's network policy (HTTP 403 from the proxy), so the official docs could not be read. Evidence comes from the installed SDK's type definitions and the quickstart Daniel supplied.
+
+| Item | Value | Status |
+|---|---|---|
+| SDK | `@google/genai` 2.31.0 (official, Apache-2.0), `new GoogleGenAI({ apiKey })` then `models.generateContent({ model, contents, config })`, text via `response.text` | CONFIRMED-SDK (type definitions, `dist/genai.d.ts`) |
+| Credential | API key sent by the SDK as the `x-goog-api-key` header; RevOS reads it from `GEMINI_API_KEY` | CONFIRMED-SDK |
+| Model | `gemini-flash-latest` (floating alias, from the supplied quickstart); `GEMINI_MODEL` overrides | OWNER-SUPPLIED; alias behavior SECONDHAND |
+| Request options used | `systemInstruction`, `temperature 0.2`, `maxOutputTokens 400`, `candidateCount 1`, HTTP timeout 20 s, `retryOptions.attempts 1` | CONFIRMED-SDK (fields exist); live effect not verified |
+| Refusals | `promptFeedback.blockReason`, candidate `finishReason` `SAFETY` / `RECITATION` / `MAX_TOKENS` map to blocked / truncated errors | CONFIRMED-SDK (enums) |
+| Errors | SDK `ApiError.status`: 401/403 → credential, 429 → rate limited, 5xx → upstream; no automatic retry | CONFIRMED-SDK |
+| What is sent | Show name, performance date, data freshness, ticket counts, gross after refunds, proceeds (or Unavailable), pace, targets, per-source attribution rows, campaign titles, tracking-link labels, spend and attention items. Nothing patron-level | Implementation (`src/ai/insightPrompt.ts`, tested) |
+| What is stored | Nothing in the database. A bounded in-memory reuse of the last text per identical figures, lost on restart | Implementation |
+| Live verification | **NOT VERIFIED.** Unit tests use a fake client. Next step: on a host with network access, set `GEMINI_API_KEY`, open a fixture show and press **Summarize with AI** once | BLOCKED |
+
 ## Prism.fm (M3, deals/budgets/settlements, D14)
 
 No public API documentation was found (search, 2026-10-21). Prism.fm advertises ticketing integrations (Eventbrite, Etix, See Tickets); third-party directories mention API-key access through a developer portal; consultancies build custom connections. **BLOCKED:** Daniel needs to ask Prism.fm for API access, documentation and terms. No endpoint will be written until those exist.
