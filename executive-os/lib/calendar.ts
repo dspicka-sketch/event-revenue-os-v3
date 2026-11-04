@@ -69,8 +69,8 @@ function sampleEvents(from: Date, to: Date): CalendarEvent[] {
     if (dow === 0 || dow === 6) continue;
     const id = day.toISOString().slice(0, 10);
     out.push(
-      { id: `${id}-a`, title: "Team standup", start: at(day, 9), end: at(day, 9, 30), allDay: false, attendees: ["team@yourco.com"] },
-      { id: `${id}-b`, title: dow % 2 ? "Acme Corp — sponsorship call" : "Venue walkthrough prep", start: at(day, 11), end: at(day, 11, 45), allDay: false, attendees: dow % 2 ? ["priya@acmecorp.com"] : [] },
+      { id: `${id}-a`, title: "Team standup", start: at(day, 9), end: at(day, 9, 30), allDay: false, attendees: ["team@yourco.example.com"] },
+      { id: `${id}-b`, title: dow % 2 ? "Acme Corp — sponsorship call" : "Venue walkthrough prep", start: at(day, 11), end: at(day, 11, 45), allDay: false, attendees: dow % 2 ? ["priya@acmecorp.example.com"] : [] },
       { id: `${id}-c`, title: "Focus: Spring Summit plan", start: at(day, 14), end: at(day, 16), allDay: false, attendees: [] },
     );
   }
