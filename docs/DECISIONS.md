@@ -78,5 +78,13 @@ Daniel confirmed that the ticket buyer typically pays the platform fee, processi
 - **Spend:** admins may enter what a source cost for a show (per tracking code, per currency). It is an expense input, never revenue, never added across currencies, and only shown in the to-date view, where cost per paid ticket = spend ÷ attributed paid tickets (integer minor units, rounded half up). A source with spend and no attributed sales still appears, with no cost per ticket. Ad-platform spend connectors (Meta, Google) would replace manual entry later; not on the roadmap yet.
 - Entered spend is a deviation from "read-only integrations" only in that RevOS stores a number the user typed. Nothing is written to any vendor.
 
+## D17 — Executive OS reuses RevOS's shared types and money rules (2026-11-04)
+Executive OS (`executive-os/`, Next.js) is a separate app that reads RevOS only through the HTTP API (`/api/auth/login`, `/api/me`, `/api/orgs/:id/pulse`, `/api/orgs/:id/events/:eventId`), never its database or vendor APIs. It imports RevOS code the same way `mobile/` does, so contract types and money formatting have one source:
+- Allowed: type-only imports from `src/shared/apiTypes.ts`, and pure (no I/O) modules in `src/domain/` (today `formatMoney`, `formatMoneyCompact`, `parseMoneyInput`, `addMinor` from `money.ts`).
+- Not allowed: anything from `src/server`, `src/db`, `src/providers`, `src/auth` or `src/sync`.
+- `executive-os/next.config.ts` sets `turbopack.root` and `outputFileTracingRoot` to the repo root so those imports resolve and deploy. Executive OS therefore has to stay in this repo.
+- `npm run check` runs `check:exec` (Executive OS typecheck and build), so a change to the shared files that breaks Executive OS fails the check. Install its dependencies first with `npm --prefix executive-os ci`.
+Decided by the portfolio-manager (escalation E-002).
+
 ## Proposed (not done)
 - A `financial_adjustments` table, deferred until a source exposes explicit refund/adjustment amounts. In M1, refunds come from order/line state.

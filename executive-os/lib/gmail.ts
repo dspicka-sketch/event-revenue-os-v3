@@ -1,41 +1,14 @@
 import type { EmailMessage } from "./types";
+import { googleConfigured, googleFetch } from "./google";
 
 // Gmail access via OAuth refresh token. Falls back to a sample inbox when not configured.
-// Scopes needed: gmail.readonly + gmail.compose (drafts only; the agent never sends).
+// The agent only reads mail and creates drafts; it never sends.
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
-export const gmailConfigured = () =>
-  Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
+export const gmailConfigured = googleConfigured;
 
-let token: { value: string; expires: number } | undefined;
-
-async function accessToken(): Promise<string> {
-  if (token && token.expires > Date.now() + 60_000) return token.value;
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-      refresh_token: process.env.GOOGLE_REFRESH_TOKEN!,
-      grant_type: "refresh_token",
-    }),
-  });
-  if (!res.ok) throw new Error(`Google token refresh failed: ${res.status} ${await res.text()}`);
-  const j = (await res.json()) as { access_token: string; expires_in: number };
-  token = { value: j.access_token, expires: Date.now() + j.expires_in * 1000 };
-  return token.value;
-}
-
-async function gmail<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
-    ...init,
-    headers: { authorization: `Bearer ${await accessToken()}`, "content-type": "application/json", ...init?.headers },
-  });
-  if (!res.ok) throw new Error(`Gmail ${path} failed: ${res.status} ${await res.text()}`);
-  return res.json() as Promise<T>;
-}
+const gmail = <T>(path: string, init?: RequestInit) => googleFetch<T>(`${API}${path}`, init);
 
 interface GmailPart {
   mimeType?: string;

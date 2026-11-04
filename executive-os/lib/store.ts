@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Activity, Briefing, EmailTriage, Task } from "./types";
+import type { Activity, Briefing, EmailTriage, SponsorDeal, Task } from "./types";
+
+export type DealInput = Partial<Omit<SponsorDeal, "id" | "created_at" | "updated_at">>;
 
 export interface Store {
   mode: "supabase" | "demo";
@@ -12,6 +14,9 @@ export interface Store {
   latestBriefing(): Promise<Briefing | null>;
   log(kind: string, summary: string): Promise<void>;
   listActivity(limit?: number): Promise<Activity[]>;
+  listDeals(): Promise<SponsorDeal[]>;
+  createDeal(d: DealInput & { sponsor: string }): Promise<SponsorDeal>;
+  updateDeal(id: string, patch: DealInput): Promise<SponsorDeal>;
 }
 
 const now = () => new Date().toISOString();
@@ -54,6 +59,15 @@ function supabaseStore(db: SupabaseClient): Store {
     async listActivity(limit = 20) {
       return must(await db.from("activity").select("*").order("created_at", { ascending: false }).limit(limit));
     },
+    async listDeals() {
+      return must(await db.from("sponsor_deals").select("*").order("next_step_due", { ascending: true, nullsFirst: false }));
+    },
+    async createDeal(d) {
+      return must(await db.from("sponsor_deals").insert(d).select().single());
+    },
+    async updateDeal(id, patch) {
+      return must(await db.from("sponsor_deals").update({ ...patch, updated_at: now() }).eq("id", id).select().single());
+    },
   };
 }
 
@@ -62,6 +76,7 @@ interface DemoData {
   triage: Map<string, EmailTriage>;
   briefings: Briefing[];
   activity: Activity[];
+  deals: SponsorDeal[];
 }
 
 function seed(): DemoData {
@@ -80,6 +95,20 @@ function seed(): DemoData {
     triage: new Map(),
     briefings: [],
     activity: [],
+    deals: [
+      deal("Acme Corp", "pitched", 2500000, "Send updated platinum/gold pricing", 3, "Platinum", "Priya Shah"),
+      deal("Northwind Brewing", "negotiating", 1200000, "Confirm sampling rights with venue", -1, "Bar partner", "Sam Ortiz"),
+      deal("Lumen Audio", "verbal", 800000, "Send contract for signature", 1, "Stage sponsor"),
+      deal("Harbor Credit Union", "lead", null, "Intro call", 6),
+      deal("Fieldhouse Apparel", "signed", 1500000, null, null, "Merch partner"),
+    ],
+  };
+}
+
+function deal(sponsor: string, stage: SponsorDeal["stage"], amount_minor: number | null, next_step: string | null, dueIn: number | null, tier: string | null = null, contact: string | null = null): SponsorDeal {
+  return {
+    id: crypto.randomUUID(), sponsor, contact, event_name: "Spring Summit", tier, stage, amount_minor, currency: "USD",
+    next_step, next_step_due: dueIn === null ? null : daysFromNow(dueIn), notes: null, created_at: now(), updated_at: now(),
   };
 }
 
@@ -128,6 +157,23 @@ function demoStore(): Store {
     },
     async listActivity(limit = 20) {
       return d.activity.slice(0, limit);
+    },
+    async listDeals() {
+      return [...d.deals].sort((a, b) => (a.next_step_due ?? "9999").localeCompare(b.next_step_due ?? "9999"));
+    },
+    async createDeal(input) {
+      const row: SponsorDeal = {
+        id: crypto.randomUUID(), contact: null, event_name: null, tier: null, stage: "lead", amount_minor: null,
+        currency: "USD", next_step: null, next_step_due: null, notes: null, created_at: now(), updated_at: now(), ...input,
+      };
+      d.deals.push(row);
+      return row;
+    },
+    async updateDeal(id, patch) {
+      const row = d.deals.find((x) => x.id === id);
+      if (!row) throw new Error(`Deal ${id} not found`);
+      Object.assign(row, patch, { updated_at: now() });
+      return row;
     },
   };
 }

@@ -22,7 +22,8 @@
     "sync": "tsx --env-file-if-exists=.env scripts/sync.ts",
     "reconcile:compare": "tsx --env-file-if-exists=.env scripts/compare-report.ts",
     "check:secrets": "tsx scripts/check-secrets.ts",
-    "check": "tsc -p tsconfig.json --noEmit && vitest run && vite build && tsx scripts/check-secrets.ts",
+    "check": "tsc -p tsconfig.json --noEmit && vitest run && vite build && tsx scripts/check-secrets.ts && npm run check:exec",
+    "check:exec": "npm --prefix executive-os run typecheck && npm --prefix executive-os run build",
     "check:mobile": "npm --prefix mobile run typecheck && npm --prefix mobile test",
     "probe:eventbrite": "tsx --env-file-if-exists=.env scripts/probe-eventbrite.ts"
   },

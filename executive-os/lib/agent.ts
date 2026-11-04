@@ -1,8 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { createEvent, listEvents } from "./calendar";
 import { createReplyDraft, getEmail, gmailConfigured, searchEmail } from "./gmail";
+import { getPulse, getShow, revosConfigured, summarizePulse } from "./revos";
+import { formatMoney, parseMoneyInput } from "../../src/domain/money";
+import { pipelineSummary } from "./sponsors";
 import { getStore } from "./store";
+import { DEAL_STAGES } from "./types";
 
 const client = new Anthropic();
 export const MODEL = "claude-opus-5-5";
@@ -15,8 +20,11 @@ Your job: keep their inbox triaged, their commitments tracked, and their day cle
 - Email triage: classify each message as urgent (needs action today), reply (needs a response, not today), fyi, or ignore. Record every classification with triage_email, with a one-line summary.
 - Drafts: when a reply is needed, write it in ${name}'s voice (warm, brief, decisive) and save it with draft_reply. You can only create drafts; ${name} reviews and sends them. Never claim an email was sent.
 - Tasks: when an email or conversation contains a commitment or deadline, create a task with a due date. Check list_tasks first so you don't duplicate one.
+- Calendar: check list_events before proposing times, and prefer gaps that keep focus blocks intact. Only add events with create_event when ${name} asks for it, and send invites to other people only when ${name} explicitly says to.
+- Revenue: RevOS (revos_pulse, revos_show) is the source of truth for ticket sales, revenue, pace, targets and which marketing is driving sales. Money values are integer minor units (cents) with a currency: divide by 100 for USD-style currencies, never add different currencies, and treat null as unknown, not zero. Say "gross after refunds", never "net revenue". If a measure is partial or data is stale, say so. If the organization is fixture data, say the numbers are sample data.
+- Sponsors: the sponsor pipeline (list_sponsor_deals, save_sponsor_deal) is where sponsorship deals live. When an email or conversation moves a deal (new interest, a counter-offer, a verbal yes, a signed contract), update its stage, amount and next step. Report signed and open pipeline separately, per currency, and say how many deals have no amount yet. Never weight or guess amounts.
 - Be concise. Lead with what needs ${name}'s decision. Use short markdown lists.
-Today is ${new Date().toDateString()}.`;
+Now: ${new Date().toISOString()} (UTC).${process.env.EXEC_TIMEZONE ? ` ${name}'s time zone is ${process.env.EXEC_TIMEZONE}; give times in it and write event times with its UTC offset.` : ""}`;
 }
 
 const tools = () => {
@@ -63,6 +71,96 @@ const tools = () => {
         if (existing) await store.upsertTriage({ ...existing, draft_id: draftId });
         await store.log("draft", `Drafted reply: ${existing?.subject ?? id}`);
         return `Draft saved (${draftId})`;
+      },
+    }),
+    betaZodTool({
+      name: "list_events",
+      description: "List calendar events between two ISO datetimes (inclusive of overlapping events).",
+      inputSchema: z.object({ from: z.string().describe("ISO 8601 datetime"), to: z.string().describe("ISO 8601 datetime") }),
+      run: async ({ from, to }) => JSON.stringify(await listEvents(new Date(from), new Date(to))),
+    }),
+    betaZodTool({
+      name: "create_event",
+      description: "Add an event to the primary calendar. Invites go out only if send_invites is true.",
+      inputSchema: z.object({
+        title: z.string(),
+        start: z.string().describe("ISO 8601 datetime with offset"),
+        end: z.string().describe("ISO 8601 datetime with offset"),
+        description: z.string().optional(),
+        location: z.string().optional(),
+        attendees: z.array(z.string()).describe("Email addresses").optional(),
+        send_invites: z.boolean().optional(),
+      }),
+      run: async ({ send_invites, ...e }) => {
+        const ev = await createEvent({ ...e, sendInvites: send_invites });
+        await store.log("calendar", `Added event: ${ev.title}`);
+        return JSON.stringify(ev);
+      },
+    }),
+    ...(revosConfigured() ? [
+      betaZodTool({
+        name: "revos_pulse",
+        description: "RevOS overview: upcoming shows with paid tickets, gross after refunds, 7-day pace vs the previous 7 days, targets, top marketing drivers and items needing attention.",
+        inputSchema: z.object({}),
+        run: async () => JSON.stringify(summarizePulse(await getPulse())),
+      }),
+      betaZodTool({
+        name: "revos_show",
+        description: "RevOS detail for one show (id from revos_pulse): revenue breakdown, ticket classes, marketing drivers, sync history.",
+        inputSchema: z.object({ id: z.string() }),
+        run: async ({ id }) => {
+          const { event, card, ticketClasses } = await getShow(id);
+          return JSON.stringify({ card, revenue: event.revenue, marketing: event.marketing, marketingLast7Days: event.marketingLast7Days, ticketClasses, freshness: event.freshness });
+        },
+      }),
+    ] : []),
+    betaZodTool({
+      name: "list_sponsor_deals",
+      description: "List sponsor deals with totals: signed vs open pipeline per currency, counts by stage, overdue next steps.",
+      inputSchema: z.object({ include_lost: z.boolean().optional() }),
+      run: async ({ include_lost }) => {
+        const deals = await store.listDeals();
+        const today = new Date().toISOString().slice(0, 10);
+        return JSON.stringify({
+          summary: pipelineSummary(deals, today),
+          deals: deals
+            .filter((d) => include_lost || d.stage !== "lost")
+            .map((d) => ({ ...d, amount: d.amount_minor === null ? "unknown" : formatMoney(d.amount_minor, d.currency) })),
+        });
+      },
+    }),
+    betaZodTool({
+      name: "save_sponsor_deal",
+      description: "Create a sponsor deal (omit id) or update one (give id). Only send the fields that change.",
+      inputSchema: z.object({
+        id: z.string().optional(),
+        sponsor: z.string().optional(),
+        contact: z.string().optional(),
+        event_name: z.string().optional(),
+        tier: z.string().optional(),
+        stage: z.enum(DEAL_STAGES).optional(),
+        amount: z.string().describe("Deal value as written, e.g. '25000' or '25,000.00'. Omit if unknown.").optional(),
+        currency: z.string().regex(/^[A-Z]{3}$/).describe("ISO 4217, default USD").optional(),
+        next_step: z.string().optional(),
+        next_step_due: z.string().describe("YYYY-MM-DD").optional(),
+        notes: z.string().optional(),
+      }),
+      run: async ({ id, amount, ...fields }) => {
+        const patch: Parameters<typeof store.updateDeal>[1] = { ...fields };
+        if (amount !== undefined) {
+          const minor = parseMoneyInput(amount, fields.currency ?? "USD");
+          if (minor === null) return `Couldn't read "${amount}" as an amount. Use digits like 25000 or 25,000.00.`;
+          patch.amount_minor = minor;
+        }
+        if (id) {
+          const deal = await store.updateDeal(id, patch);
+          await store.log("sponsor", `Updated ${deal.sponsor}: ${deal.stage}`);
+          return JSON.stringify(deal);
+        }
+        if (!fields.sponsor) return "A new deal needs a sponsor name.";
+        const deal = await store.createDeal({ ...patch, sponsor: fields.sponsor });
+        await store.log("sponsor", `New sponsor deal: ${deal.sponsor}`);
+        return JSON.stringify(deal);
       },
     }),
     betaZodTool({
@@ -131,7 +229,7 @@ export async function runTriage(): Promise<string> {
 export async function runBriefing(): Promise<string> {
   const text = await runAssistant([{
     role: "user",
-    content: "Write my daily briefing. First triage new inbox mail (in:inbox newer_than:1d) and check my active tasks. Then write the briefing in markdown with sections: **Top 3 priorities today**, **Decisions needed**, **Overdue / due soon**, **Inbox** (urgent items + drafts waiting for my review). Keep it under 250 words. Output only the briefing.",
+    content: "Write my daily briefing. First triage new inbox mail (in:inbox newer_than:1d), check my active tasks, list today's and tomorrow's calendar events, check the sponsor pipeline, and (if the revos_pulse tool is available) check RevOS. Then write the briefing in markdown with sections: **Top 3 priorities today**, **Schedule** (today's meetings with a one-line prep note each, and conflicts or back-to-backs), **Decisions needed**, **Sponsors** (next steps due or overdue, deals with no next step, signed vs open pipeline), **Revenue** (only if RevOS is available: shows in the next 14 days, ticket pace this week vs last, anything behind target or needing attention), **Overdue / due soon**, **Inbox** (urgent items + drafts waiting for my review). Keep it under 250 words. Output only the briefing.",
   }]);
   const store = getStore();
   await store.saveBriefing(text);
