@@ -8,9 +8,10 @@ An AI operating system dashboard with an executive assistant agent built on Clau
 - **Track tasks:** create, update and close follow-ups, with due dates taken from your email
 - **Manage the calendar:** read your schedule, find time and add events. Invites go to other people only when you explicitly ask.
 - **Answer revenue questions from RevOS:** ticket sales, gross after refunds, weekly pace, targets and which marketing is driving sales. Read-only.
-- **Write a daily briefing:** top priorities, today's schedule with prep notes, decisions needed, revenue (when RevOS is connected), due-soon items and inbox status. Runs on a weekday cron.
+- **Run the sponsor pipeline:** track each sponsorship deal's stage (lead → pitched → negotiating → verbal yes → signed, or lost), amount and next step, and update it when email or chat moves a deal.
+- **Write a daily briefing:** top priorities, today's schedule with prep notes, decisions needed, sponsor next steps, revenue (when RevOS is connected), due-soon items and inbox status. Runs on a weekday cron.
 
-**The dashboard** (`app/page.tsx`) shows KPI tiles, today's schedule, the latest briefing, the priority inbox, tasks, a chat with the assistant and an agent activity feed.
+**The dashboard** (`app/page.tsx`) shows KPI tiles, the sponsor pipeline, today's schedule, the latest briefing, the priority inbox, tasks, a chat with the assistant and an agent activity feed.
 
 ## Run locally
 
@@ -24,7 +25,7 @@ With only `ANTHROPIC_API_KEY` set, the app runs in **demo mode**: an in-memory s
 
 ## Connect real data
 
-**Supabase:** run `supabase/migrations/0001_init.sql` in your project, then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The service-role key is only used on the server.
+**Supabase:** run the files in `supabase/migrations/` in order in your project, then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The service-role key is only used on the server.
 
 **Gmail + Google Calendar:**
 1. Create an OAuth client (Web app) in Google Cloud and enable the Gmail API and the Google Calendar API.
@@ -46,9 +47,11 @@ Set the env vars, including `APP_SECRET` (the dashboard is then protected by bas
 | `lib/gmail.ts` | Gmail REST client, with a sample inbox as fallback |
 | `lib/calendar.ts` | Google Calendar client, with a sample schedule as fallback |
 | `lib/revos.ts` | Read-only RevOS API client (bearer session, re-signs-in on expiry) |
+| `lib/sponsors.ts` | Sponsor pipeline totals (signed vs open, per currency, unknown amounts counted separately) |
 | `lib/store.ts` | Supabase store, with an in-memory demo store as fallback |
 | `app/api/*` | `agent` (chat), `triage`, `briefing` (cron + button), `tasks`, `dashboard` |
 | `proxy.ts` | Basic auth when `APP_SECRET` is set |
 
-## Next modules
-Sponsor pipeline tracking (RevOS covers tickets, not sponsorships).
+## Sponsor amounts
+
+Deal amounts follow RevOS's money rules: integer minor units plus a currency, one total per currency (currencies are never added together), and a missing amount is shown as unknown, never as zero. Signed and open pipeline are reported separately and nothing is probability-weighted.

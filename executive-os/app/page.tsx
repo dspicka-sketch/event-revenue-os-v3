@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "@/components/Markdown";
-import type { Activity, Briefing, CalendarEvent, EmailTriage, Task } from "@/lib/types";
+import type { Activity, Briefing, CalendarEvent, EmailTriage, SponsorDeal, Task } from "@/lib/types";
+import { DEAL_STAGES } from "@/lib/types";
+import type { Bucket, pipelineSummary } from "@/lib/sponsors";
 import type { PulseResponse, ShowCard } from "../../src/shared/apiTypes";
 import { formatMoneyCompact } from "../../src/domain/money";
 
@@ -13,6 +15,7 @@ interface Dashboard {
   activity: Activity[];
   events: CalendarEvent[];
   revos: { pulse: PulseResponse | null; error: string | null } | null;
+  sponsors: { deals: SponsorDeal[]; summary: ReturnType<typeof pipelineSummary> };
   integrations: { claude: boolean; store: "supabase" | "demo"; google: boolean; revos: boolean };
 }
 interface ChatMsg { role: "user" | "assistant"; content: string }
@@ -82,7 +85,7 @@ export default function Home() {
   const refresh = useCallback(() => {
     const from = new Date(); from.setHours(0, 0, 0, 0);
     const to = new Date(from); to.setDate(to.getDate() + 1);
-    return api<Dashboard>(`/api/dashboard?from=${from.toISOString()}&to=${to.toISOString()}`).then(setData).catch((e) => setError(String(e)));
+    return api<Dashboard>(`/api/dashboard?from=${from.toISOString()}&to=${to.toISOString()}&today=${today()}`).then(setData).catch((e) => setError(String(e)));
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [chat, busy]);
@@ -154,6 +157,10 @@ export default function Home() {
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           {data?.revos && <RevenuePanel revos={data.revos} />}
+
+          {data && (
+            <SponsorPanel sponsors={data.sponsors} onStage={(id, stage) => run("deal", () => api("/api/sponsors", { method: "PATCH", body: JSON.stringify({ id, stage }) }))} />
+          )}
 
           <Panel title="Daily briefing" action={data?.briefing && <span className="text-xs text-muted">{timeAgo(data.briefing.created_at)}</span>}>
             {data?.briefing ? <Markdown text={data.briefing.content} /> : <p className="text-sm text-muted">No briefing yet. Generate one, or it runs automatically weekday mornings.</p>}
@@ -324,6 +331,63 @@ function RevenuePanel({ revos }: { revos: NonNullable<Dashboard["revos"]> }) {
           );
         })}
         {upcoming.length === 0 && <li className="py-2 text-sm text-muted">No upcoming shows.</li>}
+      </ul>
+    </Panel>
+  );
+}
+
+function bucketLabel(b: Bucket) {
+  const money = b.totals.map((t) => formatMoneyCompact(t.minor, t.currency)).join(" · ");
+  if (!money) return b.deals ? "Amount unknown" : "—";
+  return b.unknownAmount ? `${money} + ${b.unknownAmount} unknown` : money;
+}
+
+const STAGE_LABEL: Record<SponsorDeal["stage"], string> = {
+  lead: "Lead", pitched: "Pitched", negotiating: "Negotiating", verbal: "Verbal yes", signed: "Signed", lost: "Lost",
+};
+
+function SponsorPanel({ sponsors, onStage }: { sponsors: Dashboard["sponsors"]; onStage: (id: string, stage: SponsorDeal["stage"]) => void }) {
+  const { summary } = sponsors;
+  const open = sponsors.deals.filter((d) => d.stage !== "signed" && d.stage !== "lost");
+  return (
+    <Panel title="Sponsor pipeline">
+      <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          ["Signed", bucketLabel(summary.signed)],
+          ["Open pipeline", bucketLabel(summary.open)],
+          ["Open deals", String(summary.open.deals)],
+          ["Overdue next steps", String(summary.overdueNextSteps)],
+        ].map(([label, value]) => (
+          <div key={label}><div className="text-xs text-muted">{label}</div><div className={`text-lg font-semibold tabular-nums ${label === "Overdue next steps" && summary.overdueNextSteps ? "text-danger" : ""}`}>{value}</div></div>
+        ))}
+      </div>
+      <div className="mb-3 flex flex-wrap gap-2 text-xs">
+        {(["lead", "pitched", "negotiating", "verbal"] as const).map((s) => (
+          <span key={s} className="rounded-full border border-line px-2 py-0.5 text-muted">
+            {STAGE_LABEL[s]} <span className="font-medium text-ink">{summary.byStage[s].deals}</span>
+          </span>
+        ))}
+      </div>
+      <ul className="divide-y divide-line">
+        {open.map((d) => {
+          const late = d.next_step_due && d.next_step_due < today();
+          return (
+            <li key={d.id} className="flex items-center gap-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{d.sponsor}{d.tier && <span className="font-normal text-muted"> · {d.tier}</span>}</div>
+                <div className={`truncate text-xs ${late ? "text-danger" : "text-muted"}`}>
+                  {d.next_step ? `${d.next_step}${d.next_step_due ? ` · ${d.next_step_due === today() ? "today" : `due ${d.next_step_due}`}` : ""}` : "No next step"}
+                </div>
+              </div>
+              <span className="w-16 shrink-0 text-right text-sm tabular-nums">{d.amount_minor === null ? "—" : formatMoneyCompact(d.amount_minor, d.currency)}</span>
+              <select value={d.stage} onChange={(e) => onStage(d.id, e.target.value as SponsorDeal["stage"])} aria-label={`Stage for ${d.sponsor}`}
+                className="shrink-0 rounded-md border border-line bg-bg px-1.5 py-1 text-xs">
+                {DEAL_STAGES.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+              </select>
+            </li>
+          );
+        })}
+        {open.length === 0 && <li className="py-2 text-sm text-muted">No open deals. Ask the assistant to add one.</li>}
       </ul>
     </Panel>
   );

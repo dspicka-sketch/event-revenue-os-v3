@@ -1,6 +1,7 @@
 import { listEvents } from "@/lib/calendar";
 import { googleConfigured } from "@/lib/google";
 import { getPulse, revosConfigured } from "@/lib/revos";
+import { pipelineSummary } from "@/lib/sponsors";
 import { getStore } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -11,12 +12,13 @@ export async function GET(req: Request) {
   const from = new Date(url.searchParams.get("from") ?? new Date().setHours(0, 0, 0, 0));
   const to = new Date(url.searchParams.get("to") ?? +from + 864e5);
   const store = getStore();
-  const [tasks, triage, briefing, activity, events] = await Promise.all([
+  const [tasks, triage, briefing, activity, events, deals] = await Promise.all([
     store.listTasks({ status: "active" }),
     store.listTriage(),
     store.latestBriefing(),
     store.listActivity(15),
     listEvents(from, to),
+    store.listDeals(),
   ]);
   // RevOS being down shouldn't take the dashboard with it.
   let revos: { pulse: Awaited<ReturnType<typeof getPulse>> | null; error: string | null } | null = null;
@@ -26,6 +28,7 @@ export async function GET(req: Request) {
   }
   return Response.json({
     tasks, triage, briefing, activity, events, revos,
+    sponsors: { deals, summary: pipelineSummary(deals, url.searchParams.get("today") ?? new Date().toISOString().slice(0, 10)) },
     integrations: {
       claude: Boolean(process.env.ANTHROPIC_API_KEY),
       store: store.mode,

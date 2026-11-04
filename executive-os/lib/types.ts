@@ -61,3 +61,23 @@ export interface CalendarEvent {
   attendees: string[];
   link?: string;
 }
+
+export const DEAL_STAGES = ["lead", "pitched", "negotiating", "verbal", "signed", "lost"] as const;
+export type DealStage = (typeof DEAL_STAGES)[number];
+
+export interface SponsorDeal {
+  id: string;
+  sponsor: string;
+  contact: string | null;
+  event_name: string | null;
+  tier: string | null;
+  stage: DealStage;
+  /** Integer minor units (cents). Null = not known yet, never zero. */
+  amount_minor: number | null;
+  currency: string;
+  next_step: string | null;
+  next_step_due: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
