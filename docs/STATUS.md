@@ -1,8 +1,14 @@
 # Status
 
-_Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (see ROADMAP.md). Live verification: BLOCKED._
+_Last updated: 2026-11-04. Scope: desktop web app + mobile app on one backend (see ROADMAP.md). Live verification: BLOCKED._
 
 ## Completed
+
+### Executive OS (`executive-os/`, separate Next.js app; branch `executive-os`, in review)
+- Claude executive assistant: Gmail triage and reply drafts, tasks, Google Calendar, daily briefing, read-only RevOS revenue answers, and a sponsor pipeline (Supabase migration `executive-os/supabase/migrations/0002_sponsor_deals.sql`).
+- Verified: typecheck and build; dashboard run locally against a local RevOS server with fixture data; sponsor totals checked with mixed currencies and unknown amounts.
+- Not verified: the Claude agent has not been run (no API key in the build environment); migration 0002 not run against a real Supabase project; Gmail and Calendar not tried with a live Google account.
+- Shared-code boundary: DECISIONS D17.
 
 ### M1: Desktop Eventbrite slice (code complete; live gate blocked)
 - Read-only Eventbrite adapter: Bearer auth, explicit org + event, bounded continuation pagination, retries for 429/5xx/timeout with `Retry-After`, specific error kinds, and an org-ownership check.
