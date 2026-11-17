@@ -7,6 +7,13 @@
 
 export const DISCOVERY_METHOD = "discovery v0";
 
+/** Relationship stages, in order. A person moves a candidate through them; the job never does. */
+export const CANDIDATE_STAGES = [
+  "research", "representation_identified", "initial_outreach", "conversation_started", "routing_discussion",
+  "offer_submitted", "negotiation", "booked", "repeat_artist", "long_term_relationship",
+] as const;
+export type CandidateStage = (typeof CANDIDATE_STAGES)[number];
+
 export type AreaShowStatus = "onsale" | "low" | "soldout" | "cancelled" | "postponed";
 
 /** One upcoming show in the area, as read from an area calendar such as Bay Shows. */
