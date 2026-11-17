@@ -5,7 +5,7 @@ _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (s
 ## AutoRev (D19), branch `claude/autorev-sprint-1` (2026-11-16)
 
 **Built and tested (no live run yet):**
-- Underplay discovery rules (`src/domain/discovery.ts`): small-room acts and watchlist matches from area shows, one candidate per act, transparent score with reasons (`discovery v0`, unapproved).
+- Underplay discovery rules (`src/domain/discovery.ts`): small-room acts and watchlist matches from area shows, one candidate per act, transparent score with reasons (`discovery v0.1`, unapproved).
 - Read-only Bay Shows reader, watchlist and candidate pipeline tables (ten relationship stages plus dismissal), candidate API.
 - Daily sync sweep over live shows, automation run log, Resend email sender, weekly digest text, sync-failure alert email.
 - Three bearer-protected cron routes and their Vercel schedule.

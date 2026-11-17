@@ -108,4 +108,4 @@ Run one by hand: `curl -H "Authorization: Bearer $CRON_SECRET" https://<site>/ap
 - Fixture organizations are never synced and never emailed.
 - Every run is recorded in `automation_runs`. If sync has not succeeded for 36 hours, the next digest says so on its first line.
 - Candidates: `GET /api/orgs/:orgId/discovery` (members), `PUT /api/orgs/:orgId/discovery/:id` with `stage`, `dismissed` or `notes` (admins). Seed the watchlist with `npm run watchlist:seed -- <organizationId>`.
-- Candidate scores use `discovery v0`, an unapproved starting method (see DECISIONS D19).
+- Candidate scores use `discovery v0.1`, an unapproved starting method (see DECISIONS D19).

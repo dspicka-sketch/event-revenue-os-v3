@@ -5,7 +5,8 @@
 // transparent sum of signals, each with a plain reason. The weights are
 // "discovery v0": a starting proposal that the owner has not approved.
 
-export const DISCOVERY_METHOD = "discovery v0";
+// v0.1 (2026-11-16, owner): promoter billings stay in; cabaret rooms are reduced by one point.
+export const DISCOVERY_METHOD = "discovery v0.1";
 
 /** Relationship stages, in order. A person moves a candidate through them; the job never does. */
 export const CANDIDATE_STAGES = [
@@ -38,6 +39,8 @@ export interface DiscoveryRules {
   windowDays: number;
   /** Lowercase substrings of venue names that are never a source. */
   excludedVenues: string[];
+  /** Lowercase substrings of cabaret-room names. Their shows stay in but score one point lower. */
+  cabaretVenues: string[];
   /** Artist names that are never candidates (compared as artist keys). */
   excludedArtists: string[];
   /** Seats in the room being booked. Not used in scoring yet; kept with the rules for economics. */
@@ -49,6 +52,7 @@ export const WAX_POETIC_RULES: DiscoveryRules = {
   maxVenueCapacity: 600,
   windowDays: 90,
   excludedVenues: ["hopmonk"],
+  cabaretVenues: ["feinstein"],
   excludedArtists: ["jason isbell", "chris thile"],
   roomSeats: 60,
 };
@@ -163,6 +167,7 @@ export function selectCandidates(shows: AreaShow[], rules: DiscoveryRules, now: 
     const dates = new Set(list.map((h) => h.show.sourceEventId)).size;
     if (dates > 1) { score += 1; reasons.push(`${dates} area dates`); }
     if (!first.supporting && show.priceMin !== null && show.priceMin >= 30) { score += 1; reasons.push(`tickets from $${show.priceMin}`); }
+    if (!first.supporting && rules.cabaretVenues.some((v) => show.venueName.toLowerCase().includes(v))) { score -= 1; reasons.push("cabaret room (reduced)"); }
     out.push({ artistKey: key, artist: (watchHit ?? first).artist, origin, anchorShow: show, score, reasons });
   }
 

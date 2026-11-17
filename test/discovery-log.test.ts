@@ -26,7 +26,7 @@ describeDb("discovery candidate log", () => {
   it("adds a new act at the research stage", async () => {
     expect(await upsertCandidates(db, orgA, [cand()], T1)).toEqual({ added: 1, refreshed: 0 });
     const [row] = await listCandidates(db, orgA);
-    expect(row).toMatchObject({ artist: "The Deslondes", origin: "small_room", stage: "research", score: 2, reasons: ["plays rooms of 250"], method: "discovery v0", dismissed_at: null });
+    expect(row).toMatchObject({ artist: "The Deslondes", origin: "small_room", stage: "research", score: 2, reasons: ["plays rooms of 250"], method: "discovery v0.1", dismissed_at: null });
     expect(row!.anchor.venueName).toBe("The Chapel");
     expect(row!.first_seen_at.toISOString()).toBe(T1.toISOString());
   });

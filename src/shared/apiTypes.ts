@@ -154,7 +154,7 @@ export interface CandidateDto {
 }
 
 export interface DiscoveryResponse {
-  /** Scoring method version, e.g. "discovery v0". */
+  /** Scoring method version, e.g. "discovery v0.1". */
   method: string;
   candidates: CandidateDto[];
 }

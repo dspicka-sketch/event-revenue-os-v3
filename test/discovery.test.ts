@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artistKey, selectCandidates, WAX_POETIC_RULES, type AreaShow, type WatchArtist } from "../src/domain/discovery.js";
+import { artistKey, DISCOVERY_METHOD, selectCandidates, WAX_POETIC_RULES, type AreaShow, type WatchArtist } from "../src/domain/discovery.js";
 
 const NOW = new Date("2026-11-16T12:00:00Z");
 
@@ -61,6 +61,20 @@ describe("underplay discovery rules", () => {
     const out = pick([show({ status: "low", priceMin: 30 })]);
     expect(out[0]!.score).toBe(3);
     expect(out[0]!.reasons).toEqual(["low tickets at Mystic Theatre", "tickets from $30"]);
+  });
+
+  it("reduces a cabaret-room show by one point and says so", () => {
+    const out = pick([show({ venueName: "Feinstein's at the Nikko", venueCapacity: 140, priceMin: 86 })]);
+    expect(out[0]!.score).toBe(2);
+    expect(out[0]!.reasons).toEqual(["plays rooms of 140", "tickets from $86", "cabaret room (reduced)"]);
+  });
+
+  it("keeps promoter billings as candidates", () => {
+    expect(pick([show({ headliner: "Moe's Alley Presents", venueName: "Moe's Alley", venueCapacity: 250 })]).map((c) => c.artist)).toEqual(["Moe's Alley Presents"]);
+  });
+
+  it("names the scoring method version", () => {
+    expect(DISCOVERY_METHOD).toBe("discovery v0.1");
   });
 
   it("treats differently cased and punctuated names as one artist", () => {
