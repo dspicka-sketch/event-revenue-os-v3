@@ -752,3 +752,41 @@ export async function listSyncableEvents(db: Queryable, now: Date): Promise<Sync
   );
   return r.rows.map((x) => ({ organizationId: x.organization_id, eventId: x.id, name: x.name, performanceStartUtc: x.performance_start_utc }));
 }
+
+// ---------------------------------------------------------------- AutoRev run log (D19)
+
+export type AutomationJob = "sync_sweep" | "weekly_digest" | "discovery";
+
+export async function startAutomationRun(db: Queryable, job: AutomationJob, organizationId: string | null, now: Date): Promise<string> {
+  const r = await db.query<{ id: string }>("INSERT INTO automation_runs (job, organization_id, started_at) VALUES ($1, $2, $3) RETURNING id", [job, organizationId, now]);
+  return r.rows[0]!.id;
+}
+
+export async function finishAutomationRun(db: Queryable, runId: string, status: "succeeded" | "failed", detail: unknown, now: Date): Promise<void> {
+  await db.query("UPDATE automation_runs SET status = $2, detail = $3::jsonb, finished_at = $4 WHERE id = $1", [runId, status, JSON.stringify(detail ?? {}), now]);
+}
+
+export async function lastSucceededRun(db: Queryable, job: AutomationJob): Promise<{ finishedAt: Date } | null> {
+  const r = await db.query<{ finished_at: Date }>("SELECT finished_at FROM automation_runs WHERE job = $1 AND status = 'succeeded' ORDER BY finished_at DESC LIMIT 1", [job]);
+  return r.rows[0] ? { finishedAt: r.rows[0].finished_at } : null;
+}
+
+/** The most recent run that finished, whether it succeeded or failed. */
+export async function lastFinishedRun(db: Queryable, job: AutomationJob): Promise<{ status: "succeeded" | "failed"; finishedAt: Date; detail: unknown } | null> {
+  const r = await db.query<{ status: "succeeded" | "failed"; finished_at: Date; detail: unknown }>(
+    "SELECT status, finished_at, detail FROM automation_runs WHERE job = $1 AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1", [job]);
+  return r.rows[0] ? { status: r.rows[0].status, finishedAt: r.rows[0].finished_at, detail: r.rows[0].detail } : null;
+}
+
+/** Email addresses of an organization's admins whose accounts are enabled. */
+export async function listOrgAdminEmails(db: Queryable, orgId: string): Promise<string[]> {
+  const r = await db.query<{ email: string }>(
+    `SELECT u.email FROM organization_members m JOIN users u ON u.id = m.user_id
+      WHERE m.organization_id = $1 AND m.role = 'admin' AND u.disabled_at IS NULL ORDER BY lower(u.email)`, [orgId]);
+  return r.rows.map((x) => x.email);
+}
+
+export async function listLiveOrganizations(db: Queryable): Promise<OrganizationRow[]> {
+  const r = await db.query<OrganizationRow>("SELECT id, name, timezone, is_fixture FROM organizations WHERE NOT is_fixture ORDER BY name, id");
+  return r.rows;
+}

@@ -134,3 +134,11 @@ Bay Shows is Daniel's own Bay Area concert database (repo `dspicka-sketch/waxpoe
 - **Coverage limits:** 60 miles around San Francisco, next 90 days. Shows that sell outside Ticketmaster appear only when their venue's site is imported. No ticket counts: "sold out" and "low" are the only demand signals.
 - **Terms:** Ticketmaster-sourced rows carry Ticketmaster's Discovery API terms (link back for purchase). RevOS stores only the act, venue, date, status and ticket link of a candidate's anchor show.
 - **Configuration:** `BAYSHOWS_SUPABASE_URL`, `BAYSHOWS_SUPABASE_KEY` (publishable key; public by design, kept in the server environment anyway).
+
+## Resend (AutoRev digest and alert email, D19)
+
+RevOS sends plain-text email to an organization's own admins: the weekly digest and an alert when a scheduled sync could not refresh a show. This is RevOS's only outbound action. No patron data is sent.
+
+- **Endpoint:** `POST https://api.resend.com/emails` with `Authorization: Bearer <key>` and a JSON body of `from`, `to` (array), `subject`, `text`. A success answers with an `id`.
+- **Evidence level: OFFICIAL DOCS, read 2026-11-16** (resend.com/docs/api-reference/emails/send-email). **Not live-verified:** no key was available in the build environment; tests use a fake transport. The first real send is part of the live gate.
+- **Configuration:** `RESEND_API_KEY` (secret) and `REVOS_DIGEST_FROM` (a sender on a domain verified in Resend). Without both, digest and alerts are off and `/api/cron/digest` answers 503.
