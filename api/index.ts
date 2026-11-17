@@ -6,9 +6,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createPool } from "../src/db/pool.js";
 import { buildApp } from "../src/server/app.js";
+import { autoRevOptionsFromEnv } from "../src/server/autorevEnv.js";
 
 const corsOrigins = (process.env.REVOS_CORS_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean);
-const ready = buildApp({ db: createPool(), logger: true, corsOrigins }).then(async (app) => {
+const ready = buildApp({ db: createPool(), logger: true, corsOrigins, ...autoRevOptionsFromEnv(process.env) }).then(async (app) => {
   await app.ready();
   return app;
 });

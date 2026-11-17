@@ -3,6 +3,8 @@
 
 CREATE TABLE automation_runs (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Insertion order, so "the latest run" is well defined even when two runs share a timestamp.
+  seq              bigserial NOT NULL,
   job              text NOT NULL CHECK (job IN ('sync_sweep', 'weekly_digest', 'discovery')),
   -- Null for jobs that cover every organization.
   organization_id  uuid REFERENCES organizations(id) ON DELETE CASCADE,

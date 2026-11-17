@@ -767,14 +767,14 @@ export async function finishAutomationRun(db: Queryable, runId: string, status: 
 }
 
 export async function lastSucceededRun(db: Queryable, job: AutomationJob): Promise<{ finishedAt: Date } | null> {
-  const r = await db.query<{ finished_at: Date }>("SELECT finished_at FROM automation_runs WHERE job = $1 AND status = 'succeeded' ORDER BY finished_at DESC LIMIT 1", [job]);
+  const r = await db.query<{ finished_at: Date }>("SELECT finished_at FROM automation_runs WHERE job = $1 AND status = 'succeeded' ORDER BY finished_at DESC, seq DESC LIMIT 1", [job]);
   return r.rows[0] ? { finishedAt: r.rows[0].finished_at } : null;
 }
 
 /** The most recent run that finished, whether it succeeded or failed. */
 export async function lastFinishedRun(db: Queryable, job: AutomationJob): Promise<{ status: "succeeded" | "failed"; finishedAt: Date; detail: unknown } | null> {
   const r = await db.query<{ status: "succeeded" | "failed"; finished_at: Date; detail: unknown }>(
-    "SELECT status, finished_at, detail FROM automation_runs WHERE job = $1 AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1", [job]);
+    "SELECT status, finished_at, detail FROM automation_runs WHERE job = $1 AND finished_at IS NOT NULL ORDER BY finished_at DESC, seq DESC LIMIT 1", [job]);
   return r.rows[0] ? { status: r.rows[0].status, finishedAt: r.rows[0].finished_at, detail: r.rows[0].detail } : null;
 }
 

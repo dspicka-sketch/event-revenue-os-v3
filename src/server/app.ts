@@ -207,7 +207,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   app.get("/api/health", async () => ({ ok: true }));
 
-  registerAutoRev(app, { db, now, orgFor }, opts);
+  registerAutoRev(app, { db, now, orgFor, adapterFactory: factory, pulseFor: async (orgId) => buildOrgPulse((await loadEvents(orgId)).map(showInput), now()) }, opts);
 
   app.post<{ Body: { email?: unknown; password?: unknown; client?: unknown } }>("/api/auth/login", async (req, reply) => {
     const { email, password, client } = req.body ?? {};
