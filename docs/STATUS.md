@@ -14,11 +14,13 @@ _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (s
 
 | Check | Result |
 |---|---|
-| `npm run check` with local PostgreSQL 16 | typecheck OK; **186/186 tests** (108 existing + 78 new); web build OK; secret/PII scan clean |
+| `npm run check` with local PostgreSQL 16 | typecheck OK; **189/189 tests** (108 existing + 81 new); web build OK; secret/PII scan clean |
 | Bay Shows REST read | **Live read OK**: two paged requests answered HTTP 200 with distinct rows |
 | Eventbrite and Ticketmaster reachability | Both answered HTTP 401 without a key, so the network block recorded on 2026-10-21 did not occur in this environment |
 
 **Not verified:** any deployed run; a real Resend send; a real Eventbrite read; Vercel actually invoking the schedules; the mobile and desktop clients (no UI was added for candidates). No security scan was run (no StackHawk key in the environment).
+
+**Independent review (2026-11-16):** one fresh reviewer read the whole branch. No critical findings; cron authentication and tenant isolation held under probing. Five findings were fixed test-first (duplicate candidate for a watched act billed with extra words; excluded artist billed with a band name; discovery run left "running" on failure; undelivered sync alert answered 200; "no admin email" not recorded). Open, by decision: an event with two live mappings is swept twice; the same show from two sources counts as two area dates; non-Latin artist names are dropped and "(Live)" suffixes split an act; unexpected error text is passed through to admins; a retried digest can be sent twice; whether Vercel `schedules` send the `CRON_SECRET` bearer the way legacy `crons` do is unverified and is the first thing the live gate checks.
 
 **BLOCKED on the owner (live gate):**
 1. Approve and create a Supabase project for RevOS (billed on the Pro plan; confirm cost first), then `npm run db:migrate`.

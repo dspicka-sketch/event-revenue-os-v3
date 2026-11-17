@@ -79,12 +79,13 @@ describeDb("AutoRev scheduled jobs", () => {
     expect((await lastFinishedRun(db, "sync_sweep"))!.detail).toMatchObject({ attempted: 1, succeeded: 0 });
   });
 
-  it("still answers 200 for the sweep when the alert email cannot be sent", async () => {
+  it("answers 502 when a sync alert could not be sent, with the sweep itself still recorded", async () => {
     failEvent = "fx-1001";
     sendError = new EmailError("The email service answered HTTP 500.", 500);
     const r = await app.inject({ url: "/api/cron/sync", headers: CRON });
-    expect(r.statusCode).toBe(200);
-    expect(r.json().alertsFailed).toBe(1);
+    expect(r.statusCode).toBe(502);
+    expect(r.json()).toMatchObject({ attempted: 1, alertsSent: 0, alertsFailed: 1, alertsSkipped: 0 });
+    expect(await lastFinishedRun(db, "sync_sweep")).toMatchObject({ status: "succeeded", detail: { alertsFailed: 1 } });
   });
 
   it("sends the digest to live organizations' admins only and reports who was skipped", async () => {
@@ -100,6 +101,8 @@ describeDb("AutoRev scheduled jobs", () => {
     expect(sent[0]!.text).toContain("\n  Fri, Nov 13, 2026 · in 24 days\n");
     expect(sent[0]!.text).toContain("New underplay candidates this week (1):\n  - Small Act: The Chapel");
     expect(await lastSucceededRun(db, "weekly_digest")).not.toBeNull();
+    const skippedRun = (await db.query("SELECT status, detail FROM automation_runs WHERE job = 'weekly_digest' AND organization_id = $1 ORDER BY seq DESC LIMIT 1", [emptyOrgId])).rows[0];
+    expect(skippedRun).toMatchObject({ status: "failed", detail: { reason: "no_admin_email" } });
   });
 
   it("answers 502 and records a failed run when the digest cannot be sent", async () => {

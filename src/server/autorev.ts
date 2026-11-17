@@ -82,20 +82,28 @@ export function registerAutoRev(app: FastifyInstance, ctx: AutoRevContext, opts:
     if (!org || org.is_fixture || !opts.areaShowsSource) {
       return reply.code(503).send({ error: "not_configured", message: "Discovery needs REVOS_DISCOVERY_ORG_ID (a live organization) and the Bay Shows URL and key." });
     }
+    const runId = await startAutomationRun(db, "discovery", org.id, now());
     let shows: AreaShow[];
     try {
       shows = await opts.areaShowsSource(now());
     } catch (e) {
       const kind = e instanceof ProviderError ? e.kind : "unexpected";
+      await finishAutomationRun(db, runId, "failed", { kind }, now());
       req.log.error({ kind }, "discovery source failed");
       return reply.code(502).send({ error: "source_failed", kind, message: e instanceof ProviderError ? e.message : "The discovery source failed." });
     }
-    const runId = await startAutomationRun(db, "discovery", org.id, now());
-    const candidates = selectCandidates(shows, opts.discoveryRules ?? WAX_POETIC_RULES, now(), await listWatchArtists(db, org.id));
-    const counts = await upsertCandidates(db, org.id, candidates, now());
-    const result = { considered: shows.length, candidates: candidates.length, ...counts };
-    await finishAutomationRun(db, runId, "succeeded", result, now());
-    return result;
+    try {
+      const candidates = selectCandidates(shows, opts.discoveryRules ?? WAX_POETIC_RULES, now(), await listWatchArtists(db, org.id));
+      const counts = await upsertCandidates(db, org.id, candidates, now());
+      const result = { considered: shows.length, candidates: candidates.length, ...counts };
+      await finishAutomationRun(db, runId, "succeeded", result, now());
+      return result;
+    } catch {
+      // Database detail stays in the server log, never in the response.
+      await finishAutomationRun(db, runId, "failed", { kind: "store_failed" }, now());
+      req.log.error("discovery could not store candidates");
+      return reply.code(500).send({ error: "discovery_failed", message: "Discovery could not store its candidates." });
+    }
   });
 
   app.get("/api/cron/sync", async (req, reply) => {
@@ -112,6 +120,7 @@ export function registerAutoRev(app: FastifyInstance, ctx: AutoRevContext, opts:
     // Tell each affected organization's admins right away; the weekly digest repeats it.
     let alertsSent = 0;
     let alertsFailed = 0;
+    let alertsSkipped = 0;
     if (opts.emailSender && result.failures.length) {
       const byOrg = new Map<string, SweepFailure[]>();
       for (const f of result.failures) byOrg.set(f.organizationId, [...(byOrg.get(f.organizationId) ?? []), f]);
@@ -119,7 +128,7 @@ export function registerAutoRev(app: FastifyInstance, ctx: AutoRevContext, opts:
         try {
           const org = await getOrganization(db, orgId);
           const to = await listOrgAdminEmails(db, orgId);
-          if (!org || to.length === 0) continue;
+          if (!org || to.length === 0) { alertsSkipped++; continue; }
           const n = failures.length;
           await opts.emailSender.send({
             to,
@@ -132,8 +141,10 @@ export function registerAutoRev(app: FastifyInstance, ctx: AutoRevContext, opts:
         }
       }
     }
-    await finishAutomationRun(db, runId, "succeeded", { ...result, alertsSent, alertsFailed }, now());
-    return { ...result, alertsSent, alertsFailed };
+    // The sweep itself completed, so the run is recorded as succeeded. An alert that could not be
+    // delivered makes the route answer 502 so the scheduler shows the job as failed.
+    await finishAutomationRun(db, runId, "succeeded", { ...result, alertsSent, alertsFailed, alertsSkipped }, now());
+    return reply.code(alertsFailed ? 502 : 200).send({ ...result, alertsSent, alertsFailed, alertsSkipped });
   });
 
   app.get("/api/cron/digest", async (req, reply) => {
@@ -148,7 +159,13 @@ export function registerAutoRev(app: FastifyInstance, ctx: AutoRevContext, opts:
     const failed: { organizationId: string; reason: string }[] = [];
     for (const org of await listLiveOrganizations(db)) {
       const to = await listOrgAdminEmails(db, org.id);
-      if (to.length === 0) { skipped.push({ organizationId: org.id, reason: "no_admin_email" }); continue; }
+      if (to.length === 0) {
+        // Recorded, because nobody reads a scheduler's response body.
+        const skippedRun = await startAutomationRun(db, "weekly_digest", org.id, now());
+        await finishAutomationRun(db, skippedRun, "failed", { reason: "no_admin_email" }, now());
+        skipped.push({ organizationId: org.id, reason: "no_admin_email" });
+        continue;
+      }
       const runId = await startAutomationRun(db, "weekly_digest", org.id, now());
       try {
         const failures: DigestSweepFailure[] = sweepFailures.filter((f) => f.organizationId === org.id).map((f) => ({ name: f.name, kind: f.kind, message: f.message }));

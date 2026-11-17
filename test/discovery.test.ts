@@ -31,6 +31,10 @@ describe("underplay discovery rules", () => {
     expect(pick([show({ venueName: "HopMonk Tavern Sebastopol" }), show({ sourceEventId: "e2", headliner: "Jason Isbell" }), show({ sourceEventId: "e3", headliner: "Chris Thile" })])).toEqual([]);
   });
 
+  it("drops an excluded artist billed with a band name", () => {
+    expect(pick([show({ headliner: "Jason Isbell and the 400 Unit", venueCapacity: 350 })])).toEqual([]);
+  });
+
   it("drops cancelled and postponed shows", () => {
     expect(pick([show({ status: "cancelled" }), show({ sourceEventId: "e2", status: "postponed" })])).toEqual([]);
   });
@@ -96,6 +100,11 @@ describe("underplay discovery rules", () => {
 
     it("does not match a one-word watch name inside a longer title", () => {
       expect(pick([show({ headliner: "The Merchant of Venice", venueCapacity: 2000 })], watch)).toEqual([]);
+    });
+
+    it("gives one candidate, not two, when a watched act's billing has extra words", () => {
+      const out = pick([show({ headliner: "Mack Keane with special guests", venueCapacity: 350 }), show({ sourceEventId: "e2", headliner: "Mack Keane & Friends Band", venueCapacity: 350, startsAt: "2026-12-09T04:00:00Z" })], watch);
+      expect(out.map((c) => [c.artist, c.origin])).toEqual([["Mack Keane", "watchlist"]]);
     });
 
     it("still drops watched acts at excluded venues and cancelled shows", () => {

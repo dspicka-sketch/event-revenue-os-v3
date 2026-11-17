@@ -106,7 +106,9 @@ interface Hit {
 export function selectCandidates(shows: AreaShow[], rules: DiscoveryRules, now: Date, watchlist: WatchArtist[] = []): Candidate[] {
   const from = now.getTime();
   const until = from + rules.windowDays * 86400_000;
-  const excludedArtists = new Set(rules.excludedArtists.map(artistKey));
+  const excludedKeys = rules.excludedArtists.map(artistKey).filter(Boolean);
+  /** An excluded act stays excluded when billed with a band or guests ("Jason Isbell and the 400 Unit"). */
+  const isExcluded = (key: string) => excludedKeys.some((x) => matchesWatch(x, key));
   const hits: Hit[] = [];
 
   for (const show of shows) {
@@ -119,18 +121,18 @@ export function selectCandidates(shows: AreaShow[], rules: DiscoveryRules, now: 
     const billed = cleanHeadliner(show.headliner);
     const billedKey = artistKey(billed);
     const fullKey = artistKey(show.headliner);
-    const watched = new Set<string>();
+    // A watched act billed with extra words ("X with special guests") is one watchlist hit, not also a small-room act.
+    let headlinerWatched = false;
     for (const w of watchlist) {
-      if (excludedArtists.has(w.artistKey)) continue;
+      if (isExcluded(w.artistKey)) continue;
       if (matchesWatch(w.artistKey, billedKey) || matchesWatch(w.artistKey, fullKey)) {
         hits.push({ key: w.artistKey, artist: billedKey === w.artistKey ? billed : w.name, origin: "watchlist", show, supporting: null });
-        watched.add(w.artistKey);
+        headlinerWatched = true;
       } else if (show.support.some((s) => matchesWatch(w.artistKey, artistKey(s)))) {
         hits.push({ key: w.artistKey, artist: w.name, origin: "watchlist", show, supporting: billed });
-        watched.add(w.artistKey);
       }
     }
-    if (!billedKey || excludedArtists.has(billedKey) || watched.has(billedKey)) continue;
+    if (headlinerWatched || !billedKey || isExcluded(billedKey) || isExcluded(fullKey)) continue;
     if (show.venueCapacity === null || show.venueCapacity > rules.maxVenueCapacity) continue;
     hits.push({ key: billedKey, artist: billed, origin: "small_room", show, supporting: null });
   }

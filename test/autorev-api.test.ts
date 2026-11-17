@@ -92,6 +92,17 @@ describeDb("AutoRev discovery API", () => {
     sourceError = null;
     expect(r.statusCode).toBe(502);
     expect(r.json()).toMatchObject({ error: "source_failed", kind: "server" });
+    const run = (await db.query("SELECT status, detail FROM automation_runs WHERE job = 'discovery' ORDER BY seq DESC LIMIT 1")).rows[0];
+    expect(run).toMatchObject({ status: "failed", detail: { kind: "server" } });
+  });
+
+  it("finishes the run as failed and hides database detail when candidates cannot be stored", async () => {
+    shows = [show("z", "Bad\u0000Name", 250)];
+    const r = await app.inject({ url: "/api/cron/discovery", headers: CRON });
+    shows = [show("a", "Small Act", 250), show("b", "Arena Act", 5000), show("c", "Mack Keane", 1400)];
+    expect(r.statusCode).toBe(500);
+    expect(r.json()).toEqual({ error: "discovery_failed", message: "Discovery could not store its candidates." });
+    expect((await db.query("SELECT count(*)::int AS n FROM automation_runs WHERE job = 'discovery' AND status = 'running'")).rows[0].n).toBe(0);
   });
 
   it("lets a viewer list candidates, watchlist first", async () => {
