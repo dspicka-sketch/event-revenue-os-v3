@@ -22,6 +22,7 @@ import type {
   ConnectionsResponse, EventDetailResponse, EventDto, EventsResponse, LoginResponse, MeResponse, Organization, PulseResponse, RefreshResponse,
 } from "../shared/apiTypes.js";
 import { syncEvent, type AdapterFactory, defaultAdapterFactory } from "../sync/syncEvent.js";
+import { isCronPath, registerAutoRev, type AutoRevOptions } from "./autorev.js";
 
 const CODE_RE = /^[A-Za-z0-9._~-]{1,100}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,7 +50,7 @@ export const SECURITY_CSP = [
   "frame-ancestors 'none'",
 ].join("; ");
 
-export interface AppOptions {
+export interface AppOptions extends AutoRevOptions {
   db: Db;
   adapterFactory?: AdapterFactory;
   marketingAdapterFactory?: MarketingAdapterFactory;
@@ -185,6 +186,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.addHook("onRequest", async (req, reply) => {
     if (!req.url.startsWith("/api/") || req.method === "OPTIONS") return;
     if (req.url === "/api/health" || req.url === "/api/auth/login") return;
+    // AutoRev cron routes authenticate with CRON_SECRET inside the route (D19).
+    if (isCronPath(req.url)) return;
     const h = req.headers.authorization ?? "";
     const user = h.startsWith("Bearer ") ? await authenticate(db, h.slice(7)) : null;
     if (!user) return reply.code(401).send({ error: "unauthorized", message: "Sign in required." });
@@ -203,6 +206,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   }
 
   app.get("/api/health", async () => ({ ok: true }));
+
+  registerAutoRev(app, { db, now, orgFor }, opts);
 
   app.post<{ Body: { email?: unknown; password?: unknown; client?: unknown } }>("/api/auth/login", async (req, reply) => {
     const { email, password, client } = req.body ?? {};

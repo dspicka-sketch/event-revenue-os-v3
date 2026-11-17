@@ -103,3 +103,16 @@ describe("underplay discovery rules", () => {
     });
   });
 });
+
+describe("handoff watchlist seed", () => {
+  it("holds 44 artists with distinct artist keys", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const seed = JSON.parse(await readFile(new URL("../scripts/data/watchlist-handoff-v6.1.json", import.meta.url), "utf8")) as { artists: { name: string }[] };
+    const keys = seed.artists.map((a) => artistKey(a.name));
+    expect(keys).toHaveLength(44);
+    expect(new Set(keys).size).toBe(44);
+    expect(keys.every((k) => k.length > 0)).toBe(true);
+    expect(keys).toContain("andfriends");
+    expect(keys).toContain("adela");
+  });
+});

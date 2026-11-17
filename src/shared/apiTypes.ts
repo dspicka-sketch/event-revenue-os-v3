@@ -128,3 +128,33 @@ export interface ApiErrorBody {
   message?: string;
   action?: string;
 }
+
+// ---- AutoRev underplay discovery (D19)
+
+export type CandidateOriginDto = "watchlist" | "small_room";
+export type CandidateStageDto =
+  | "research" | "representation_identified" | "initial_outreach" | "conversation_started" | "routing_discussion"
+  | "offer_submitted" | "negotiation" | "booked" | "repeat_artist" | "long_term_relationship";
+
+export interface CandidateDto {
+  id: string;
+  artist: string;
+  origin: CandidateOriginDto;
+  stage: CandidateStageDto;
+  dismissed: boolean;
+  /** Sum of plain signals. The weights are an unapproved starting proposal (see `method`). */
+  score: number;
+  reasons: string[];
+  /** The act's soonest qualifying area show when last seen. */
+  anchor: { headliner: string; venueName: string; city: string; venueCapacity: number | null; startsAt: string; status: string; ticketUrl: string | null };
+  firstSeenAt: string;
+  lastSeenAt: string;
+  stageChangedAt: string | null;
+  notes: string | null;
+}
+
+export interface DiscoveryResponse {
+  /** Scoring method version, e.g. "discovery v0". */
+  method: string;
+  candidates: CandidateDto[];
+}
