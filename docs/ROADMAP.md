@@ -25,7 +25,7 @@ The original target vendors (On The Stage, Laylo, Prism.fm, Prolific 1) remain b
 
 ## Deferred, by design
 
-- Background sync schedules (manual Refresh only until live data is verified)
+- Background sync schedules: being built on `claude/autorev-sprint-1` under D19 (owner decision 2026-11-16); live gate pending
 - Push notifications for attention items (mobile). This needs a hosted backend and store builds.
 - App-store distribution and a hosted deployment (need Daniel's confirmation and accounts)
 - Multi-org self-service sign-up and SSO
