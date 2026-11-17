@@ -92,3 +92,20 @@ See [`mobile/README.md`](mobile/README.md). Short version: `cd mobile && npm ci 
 The Executive OS assistant and dashboard (Next.js) lives in [`executive-os/`](executive-os/)
 as a separate app with its own `package.json`. See its README to run it. On Vercel, set the
 project's Root Directory to `executive-os`.
+
+## AutoRev: scheduled jobs (D19)
+
+Three jobs run on Vercel's scheduler (`schedules` in `vercel.json`). Each is a GET route that requires `Authorization: Bearer $CRON_SECRET`; Vercel sends that header itself when `CRON_SECRET` is set on the project. With no `CRON_SECRET` the routes answer 503 and nothing runs.
+
+| Job | Route | When (UTC) | Needs |
+|---|---|---|---|
+| Sync every live show | `/api/cron/sync` | 11:23 daily | `CRON_SECRET` |
+| Underplay discovery | `/api/cron/discovery` | 12:17 daily, after Bay Shows' own imports | `CRON_SECRET`, `BAYSHOWS_SUPABASE_URL`, `BAYSHOWS_SUPABASE_KEY`, `REVOS_DISCOVERY_ORG_ID` |
+| Weekly digest email | `/api/cron/digest` | 15:37 Mondays | `CRON_SECRET`, `RESEND_API_KEY`, `REVOS_DIGEST_FROM` |
+
+Run one by hand: `curl -H "Authorization: Bearer $CRON_SECRET" https://<site>/api/cron/sync`
+
+- Fixture organizations are never synced and never emailed.
+- Every run is recorded in `automation_runs`. If sync has not succeeded for 36 hours, the next digest says so on its first line.
+- Candidates: `GET /api/orgs/:orgId/discovery` (members), `PUT /api/orgs/:orgId/discovery/:id` with `stage`, `dismissed` or `notes` (admins). Seed the watchlist with `npm run watchlist:seed -- <organizationId>`.
+- Candidate scores use `discovery v0`, an unapproved starting method (see DECISIONS D19).

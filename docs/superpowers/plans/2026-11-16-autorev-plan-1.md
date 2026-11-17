@@ -284,3 +284,10 @@ Each line is a decision or action that CLAUDE.md reserves for the owner. Stop an
 - If Vercel Cron itself stops firing the digest, nothing inside RevOS can report it. The 36-hour warning covers a stalled sync, not a missing digest.
 - Wax Poetic's own sales stay on On The Stage. This plan proves AutoRev on Eventbrite; the On The Stage path remains Sprint 1 under D18.
 - Vercel functions keep no memory between calls, so the in-memory sign-in throttle and Refresh cooldown noted in DECISIONS D10 are weaker when hosted. The DB-backed throttle stays in Sprint 3.
+
+## Amendments made during the build (2026-11-16)
+
+- **Handoff v6.1 incorporated** at the owner's instruction ("Incorporate into AutoRev"; "Flag inconsistencies and defer to Claude"): a per-organization watchlist seeded from the handoff's 44 historical artists, watchlist matching in the discovery rules, and the handoff's ten relationship stages (plus a dismissal flag) in place of the six August statuses. The handoff's historical scores, representation leads and routing notes were not imported.
+- AutoRev routes live in `src/server/autorev.ts`; tests in `test/autorev-api.test.ts` and `test/autorev-jobs.test.ts`.
+- `vercel.json` uses `schedules`, not `crons`: Vercel's documentation (read 2026-11-16) calls `crons` legacy.
+- Email failures throw `EmailError`. The run log has a `seq` column for ordering. The digest route returns `{ sent, failed, skipped }`.

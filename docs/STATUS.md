@@ -2,6 +2,31 @@
 
 _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (see ROADMAP.md). Live verification: BLOCKED._
 
+## AutoRev (D19), branch `claude/autorev-sprint-1` (2026-11-16)
+
+**Built and tested (no live run yet):**
+- Underplay discovery rules (`src/domain/discovery.ts`): small-room acts and watchlist matches from area shows, one candidate per act, transparent score with reasons (`discovery v0`, unapproved).
+- Read-only Bay Shows reader, watchlist and candidate pipeline tables (ten relationship stages plus dismissal), candidate API.
+- Daily sync sweep over live shows, automation run log, Resend email sender, weekly digest text, sync-failure alert email.
+- Three bearer-protected cron routes and their Vercel schedule.
+
+**Verification actually performed (2026-11-16, cloud build environment):**
+
+| Check | Result |
+|---|---|
+| `npm run check` with local PostgreSQL 16 | typecheck OK; **186/186 tests** (108 existing + 78 new); web build OK; secret/PII scan clean |
+| Bay Shows REST read | **Live read OK**: two paged requests answered HTTP 200 with distinct rows |
+| Eventbrite and Ticketmaster reachability | Both answered HTTP 401 without a key, so the network block recorded on 2026-10-21 did not occur in this environment |
+
+**Not verified:** any deployed run; a real Resend send; a real Eventbrite read; Vercel actually invoking the schedules; the mobile and desktop clients (no UI was added for candidates). No security scan was run (no StackHawk key in the environment).
+
+**BLOCKED on the owner (live gate):**
+1. Approve and create a Supabase project for RevOS (billed on the Pro plan; confirm cost first), then `npm run db:migrate`.
+2. Set `DATABASE_URL`, `CRON_SECRET`, `BAYSHOWS_SUPABASE_URL`, `BAYSHOWS_SUPABASE_KEY`, `REVOS_DISCOVERY_ORG_ID`, `RESEND_API_KEY`, `REVOS_DIGEST_FROM` on the Vercel project. The Resend sending domain must be verified first.
+3. Create the Wax Poetic organization and an admin user; run `npm run watchlist:seed -- <orgId>`.
+4. For live sales data: an Eventbrite token from the account that owns the event, or the On The Stage path (D18).
+5. PM review, a portfolio decision on E-004 (merge order with PR #5 and the On The Stage branch), then merge.
+
 ## Completed
 
 ### M1: Desktop Eventbrite slice (code complete; live gate blocked)
