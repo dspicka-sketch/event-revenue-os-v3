@@ -728,3 +728,27 @@ export async function setCandidateStage(db: Queryable, orgId: string, id: string
   );
   return (r.rowCount ?? 0) > 0;
 }
+
+// ---------------------------------------------------------------- AutoRev scheduled sync (D19)
+
+export interface SyncableEvent {
+  organizationId: string;
+  eventId: string;
+  name: string;
+  performanceStartUtc: Date | null;
+}
+
+/** Events the daily sweep refreshes: live connections in non-fixture organizations, undated or not older than 7 days. */
+export async function listSyncableEvents(db: Queryable, now: Date): Promise<SyncableEvent[]> {
+  const r = await db.query<{ organization_id: string; id: string; name: string; performance_start_utc: Date | null }>(
+    `SELECT e.organization_id, e.id, e.name, e.performance_start_utc
+       FROM canonical_events e
+       JOIN organizations o ON o.id = e.organization_id AND NOT o.is_fixture
+       JOIN source_event_mappings m ON m.canonical_event_id = e.id AND m.organization_id = e.organization_id
+       JOIN source_connections c ON c.id = m.connection_id AND c.organization_id = e.organization_id AND c.mode = 'live'
+      WHERE e.performance_start_utc IS NULL OR e.performance_start_utc > $1::timestamptz - interval '7 days'
+      ORDER BY e.organization_id, e.performance_start_utc NULLS LAST, e.id`,
+    [now],
+  );
+  return r.rows.map((x) => ({ organizationId: x.organization_id, eventId: x.id, name: x.name, performanceStartUtc: x.performance_start_utc }));
+}
