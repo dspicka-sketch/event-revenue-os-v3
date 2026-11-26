@@ -75,3 +75,8 @@ Give the owner and a remote team member a working preview that shows real, usefu
 - "Move to production. Add the model and price logic from earlier."
 - Deal estimate added as D20 / discovery v0.4. `npm run check` with `TEST_DATABASE_URL`: 213 of 213 passed.
 - Portfolio-manager rulings applied: production deploys from this branch line only; PR to `main` stays open and unmerged; shared database conditions recorded in `docs/STATUS.md` (E-005).
+
+## Production deployment record
+- 2026-11-26: Vercel production deployment `dpl_FGL8hN8ESAyxnSgQSVMYcjEBpqnu` built from commit `6926808` of this branch. Database: Supabase project `revos` (shared with previews, E-005).
+- Verified on https://event-revenue-os-v3.vercel.app: health 200, admin sign-in, one manual discovery run (605 shows considered, 270 candidates, method `discovery v0.4`).
+- Not observed: a scheduled cron run. PR #7 to `main` is open and unmerged.
