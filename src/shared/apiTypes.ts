@@ -147,6 +147,10 @@ export interface CandidateDto {
   reasons: string[];
   /** The act's soonest qualifying area show when last seen. */
   anchor: { headliner: string; venueName: string; city: string; venueCapacity: number | null; startsAt: string; status: string; ticketUrl: string | null };
+  /** Whole days from the server's clock until the anchor show starts. */
+  daysUntilShow: number;
+  /** Under 30 days out: logistics are tight. A flag only; it never hides or down-ranks a candidate. */
+  shortLead: boolean;
   firstSeenAt: string;
   lastSeenAt: string;
   stageChangedAt: string | null;

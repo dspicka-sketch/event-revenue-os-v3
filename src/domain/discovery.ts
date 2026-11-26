@@ -15,6 +15,19 @@ export const CANDIDATE_STAGES = [
 ] as const;
 export type CandidateStage = (typeof CANDIDATE_STAGES)[number];
 
+/**
+ * Lead time under which a booking is tight on logistics for the agent and the room.
+ * A flag, never a filter and never a ranking penalty: a 60-seat underplay sells fast,
+ * so a near date can still be worth an offer (owner, 2026-11-20).
+ */
+export const SHORT_LEAD_DAYS = 30;
+
+/** Whole days from `now` until the show starts (negative once it has started) and whether that is a short lead. */
+export function leadTime(startsAtIso: string, now: Date): { daysUntilShow: number; shortLead: boolean } {
+  const daysUntilShow = Math.floor((Date.parse(startsAtIso) - now.getTime()) / 86_400_000);
+  return { daysUntilShow, shortLead: daysUntilShow < SHORT_LEAD_DAYS };
+}
+
 export type AreaShowStatus = "onsale" | "low" | "soldout" | "cancelled" | "postponed";
 
 /** One upcoming show in the area, as read from an area calendar such as Bay Shows. */

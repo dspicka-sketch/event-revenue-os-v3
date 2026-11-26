@@ -2,6 +2,25 @@
 
 _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (see ROADMAP.md). Live verification: BLOCKED._
 
+## Discovery screen and preview environment, branch `claude/candidates-screen` (2026-11-25)
+
+**Built and tested:**
+- Desktop Discovery page (`/orgs/:orgId/discovery`): candidates with the anchor show in the venue timezone, room capacity, days out, score and reasons, stage, and a show-dismissed toggle. Admins change stage and dismiss or restore; viewers read only. It renders only what the discovery API returns.
+- Short-lead flag (`leadTime` in `src/domain/discovery.ts`): a candidate under 30 days out is flagged, never hidden and never down-ranked (owner, 2026-11-20). Exposed as `daysUntilShow` and `shortLead` on the candidate.
+- Verification: `npm run check` with `TEST_DATABASE_URL` on local PostgreSQL 16: 194 of 194 tests passed, typecheck and build clean, secret scan clean. Mobile unchanged and its checks not run.
+
+**Preview environment (owner approved 2026-11-25):**
+- New Supabase project `revos` (us-east-1). The app connects as its own role, `revos_app`; every table has row level security on with no policies, so Supabase's public data API cannot read them.
+- Migrations 001 to 010 applied and the fixture organization seeded there. Vercel `DATABASE_URL` (production and preview) points at it through the transaction pooler.
+- A live organization "Wax Poetic" exists for discovery. No ticketing or marketing source is connected to it.
+
+**Not done:**
+- The deal model and artist-fit rules from 2026-11-20 are not in the scoring. Ticket price (what fans will pay) is still open with the owner.
+- No mobile Discovery screen.
+- Vercel cron schedules run only on production deployments, and nothing is deployed to production. On previews the discovery job runs only when called by hand.
+- On The Stage data path still unknown (D18 questions unanswered); Mailchimp and Resend keys not set.
+- When the database is unreachable the API returns the raw database error text to the client. To fix.
+
 ## AutoRev (D19), branch `claude/autorev-sprint-1` (2026-11-16)
 
 **Built and tested (no live run yet):**

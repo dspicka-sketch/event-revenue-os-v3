@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artistKey, DISCOVERY_METHOD, selectCandidates, WAX_POETIC_RULES, type AreaShow, type WatchArtist } from "../src/domain/discovery.js";
+import { artistKey, DISCOVERY_METHOD, selectCandidates, WAX_POETIC_RULES, type AreaShow, type WatchArtist, leadTime, SHORT_LEAD_DAYS } from "../src/domain/discovery.js";
 
 const NOW = new Date("2026-11-16T12:00:00Z");
 
@@ -137,5 +137,19 @@ describe("handoff watchlist seed", () => {
     expect(keys.every((k) => k.length > 0)).toBe(true);
     expect(keys).toContain("andfriends");
     expect(keys).toContain("adela");
+  });
+});
+
+describe("lead time flag", () => {
+  const now = new Date("2026-11-20T17:00:00Z");
+  it("counts whole days until the show", () => {
+    expect(leadTime("2026-11-21T17:00:00Z", now).daysUntilShow).toBe(1);
+    expect(leadTime("2026-11-21T16:59:00Z", now).daysUntilShow).toBe(0);
+    expect(leadTime("2026-11-19T17:00:00Z", now).daysUntilShow).toBe(-1);
+  });
+  it("flags a show under 30 days out and not one at 30 days or more", () => {
+    expect(SHORT_LEAD_DAYS).toBe(30);
+    expect(leadTime("2026-12-20T16:59:00Z", now)).toEqual({ daysUntilShow: 29, shortLead: true });
+    expect(leadTime("2026-12-20T17:00:00Z", now)).toEqual({ daysUntilShow: 30, shortLead: false });
   });
 });

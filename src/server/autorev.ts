@@ -17,7 +17,7 @@ import type { OrgPulse } from "../domain/pulse.js";
 import type { EmailSender } from "../notify/email.js";
 import { syncAllEvents, type SweepFailure } from "../sync/syncAll.js";
 import type { AdapterFactory } from "../sync/syncEvent.js";
-import { CANDIDATE_STAGES, DISCOVERY_METHOD, selectCandidates, WAX_POETIC_RULES, type AreaShow, type CandidateStage, type DiscoveryRules } from "../domain/discovery.js";
+import { CANDIDATE_STAGES, DISCOVERY_METHOD, leadTime, selectCandidates, WAX_POETIC_RULES, type AreaShow, type CandidateStage, type DiscoveryRules } from "../domain/discovery.js";
 import { ProviderError } from "../providers/errors.js";
 import type { CandidateDto, DiscoveryResponse } from "../shared/apiTypes.js";
 
@@ -48,8 +48,9 @@ export function isCronPath(url: string): boolean {
   return (url.split("?")[0] ?? "").startsWith("/api/cron/");
 }
 
-function candidateDto(r: CandidateRow): CandidateDto {
+function candidateDto(r: CandidateRow, now: Date): CandidateDto {
   return {
+    ...leadTime(r.anchor.startsAt, now),
     id: r.id, artist: r.artist, origin: r.origin, stage: r.stage, dismissed: r.dismissed_at !== null, score: r.score, reasons: r.reasons,
     anchor: { headliner: r.anchor.headliner, venueName: r.anchor.venueName, city: r.anchor.city, venueCapacity: r.anchor.venueCapacity, startsAt: r.anchor.startsAt, status: r.anchor.status, ticketUrl: r.anchor.ticketUrl },
     firstSeenAt: r.first_seen_at.toISOString(), lastSeenAt: r.last_seen_at.toISOString(), stageChangedAt: r.stage_changed_at?.toISOString() ?? null, notes: r.notes,
@@ -190,7 +191,7 @@ export function registerAutoRev(app: FastifyInstance, ctx: AutoRevContext, opts:
     if (!org) return;
     const stage = CANDIDATE_STAGES.includes(req.query.stage as CandidateStage) ? (req.query.stage as CandidateStage) : undefined;
     const rows = await listCandidates(db, org.id, { stage, includeDismissed: req.query.include === "dismissed" });
-    return { method: DISCOVERY_METHOD, candidates: rows.map(candidateDto) } satisfies DiscoveryResponse;
+    return { method: DISCOVERY_METHOD, candidates: rows.map((r) => candidateDto(r, now())) } satisfies DiscoveryResponse;
   });
 
   app.put<{ Params: { orgId: string; id: string }; Body: { stage?: unknown; dismissed?: unknown; notes?: unknown } }>("/api/orgs/:orgId/discovery/:id", async (req, reply) => {
