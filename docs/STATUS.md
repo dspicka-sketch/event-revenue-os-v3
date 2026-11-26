@@ -9,6 +9,14 @@ _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (s
 - Short-lead flag (`leadTime` in `src/domain/discovery.ts`): a candidate under 30 days out is flagged, never hidden and never down-ranked (owner, 2026-11-20). Exposed as `daysUntilShow` and `shortLead` on the candidate.
 - Verification: `npm run check` with `TEST_DATABASE_URL` on local PostgreSQL 16: 194 of 194 tests passed, typecheck and build clean, secret scan clean. Mobile unchanged and its checks not run.
 
+**Discovery v0.2 filter (owner, 2026-11-25: keep music, comedy and touring performing arts that suit a 60-seat house; filter the rest):**
+- `nonTouringFormat` drops karaoke and open mic, bar crawls, dance and party nights, themed nights, festivals and benefits, kids' series, and bills of three or more acts. Comedy stays in, including a room's own comedy night.
+- The act is read out of presenter billings ("Moe's Alley Presents: X"), support lines ("X w/ Y") and tour titles.
+- The venue's own nights are excluded.
+- Two session calls, each its own removable rule and reported to the owner as reversible: tribute acts are dropped, and the Punk / Metal genre is dropped for small-room acts (a watchlist act always stays).
+- Known gaps: tribute bands whose listing does not say "tribute" still pass; a touring package billed as three names is dropped as a shared bill.
+- Verification: `npm run check` with `TEST_DATABASE_URL`: 200 of 200 tests passed.
+
 **Preview environment (owner approved 2026-11-25):**
 - New Supabase project `revos` (us-east-1). The app connects as its own role, `revos_app`; every table has row level security on with no policies, so Supabase's public data API cannot read them.
 - Migrations 001 to 010 applied and the fixture organization seeded there. Vercel `DATABASE_URL` (production and preview) points at it through the transaction pooler.

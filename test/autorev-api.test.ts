@@ -109,7 +109,7 @@ describeDb("AutoRev discovery API", () => {
     const r = await app.inject({ url: `/api/orgs/${orgId}/discovery`, headers: viewer });
     expect(r.statusCode).toBe(200);
     const body = r.json() as DiscoveryResponse;
-    expect(body.method).toBe("discovery v0.1");
+    expect(body.method).toBe("discovery v0.2");
     expect(body.candidates.map((c) => [c.artist, c.origin, c.stage, c.score])).toEqual([["Mack Keane", "watchlist", "research", 5], ["Small Act", "small_room", "research", 2]]);
     expect(body.candidates[0]).toMatchObject({ reasons: ["on your watchlist"], anchor: { venueName: "The Chapel", startsAt: "2026-12-01T04:00:00Z" }, dismissed: false });
   });

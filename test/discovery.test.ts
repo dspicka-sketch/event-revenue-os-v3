@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artistKey, DISCOVERY_METHOD, selectCandidates, WAX_POETIC_RULES, type AreaShow, type WatchArtist, leadTime, SHORT_LEAD_DAYS } from "../src/domain/discovery.js";
+import { artistKey, DISCOVERY_METHOD, selectCandidates, WAX_POETIC_RULES, type AreaShow, type WatchArtist, leadTime, nonTouringFormat, SHORT_LEAD_DAYS } from "../src/domain/discovery.js";
 
 const NOW = new Date("2026-11-16T12:00:00Z");
 
@@ -74,7 +74,7 @@ describe("underplay discovery rules", () => {
   });
 
   it("names the scoring method version", () => {
-    expect(DISCOVERY_METHOD).toBe("discovery v0.1");
+    expect(DISCOVERY_METHOD).toBe("discovery v0.2");
   });
 
   it("treats differently cased and punctuated names as one artist", () => {
@@ -151,5 +151,55 @@ describe("lead time flag", () => {
     expect(SHORT_LEAD_DAYS).toBe(30);
     expect(leadTime("2026-12-20T16:59:00Z", now)).toEqual({ daysUntilShow: 29, shortLead: true });
     expect(leadTime("2026-12-20T17:00:00Z", now)).toEqual({ daysUntilShow: 30, shortLead: false });
+  });
+});
+
+describe("touring-format filter (v0.2)", () => {
+  const NOW2 = new Date("2026-11-26T00:00:00Z");
+  const at = (headliner: string, over: Partial<AreaShow> = {}): AreaShow => ({
+    sourceEventId: headliner, headliner, support: [], venueName: "Room", city: "San Francisco", venueCapacity: 300,
+    startsAt: "2026-12-20T04:00:00Z", genre: null, priceMin: null, status: "onsale", ticketUrl: null, ...over,
+  });
+  const artists = (shows: AreaShow[]) => selectCandidates(shows, WAX_POETIC_RULES, NOW2).map((c) => c.artist);
+
+  it("drops formats that are not a touring act", () => {
+    for (const t of ["Karaoke Tuesday", "Open Mic Night", "The Official Santa Con SF Bar Crawl", "2000's Night", "The Emo Night Tour", "Kawaii Rave",
+      "Gimme Gimme Disco", "Moe's Alley's NYE Bash with Wooster!", "The Rock and Roll Playhouse: Music of Bob Marley", "Big Bad Bitchfest 3 (Night 1)",
+      "Country For A Cause: A Benefit for the Food Bank", "Cartoon Hearts/ Amity St./ Trip Drive/ Zacc & The Scissorlips", "Mikey Vee, Lyka B, Solus The Happy Human"]) {
+      expect(nonTouringFormat(t), t).not.toBeNull();
+    }
+    expect(artists([at("Karaoke Tuesday"), at("Kawaii Rave")])).toEqual([]);
+  });
+
+  it("keeps music, comedy and other touring performance", () => {
+    for (const t of ["Keller Williams", "Cliff Cash", "Felton Comedy Night", "A John Waters Christmas", "Reality Gays: Same Gays, New Wigs", "The Night Owls",
+      "Oakland Interfaith Gospel Choir", "Full Circle Boys - Day 1 Tour Experience", "Moe's Alley Presents: Kabaka Pyramid (Night 1) w/ Kava Jah & The Remedy + Selecta 7"]) {
+      expect(nonTouringFormat(t), t).toBeNull();
+    }
+  });
+
+  it("names tribute acts as their own removable rule", () => {
+    expect(nonTouringFormat("Valerie: A Tribute to Amy Winehouse")).toBe("tribute act");
+    expect(nonTouringFormat("Strangelove: The Depeche Mode Experience")).toBe("tribute act");
+  });
+
+  it("reads the act out of presenter billings, support lines and tour titles", () => {
+    expect(artists([at("Moe's Alley Presents: Kabaka Pyramid (Night 1) w/ Kava Jah & The Remedy + Selecta 7")])).toEqual(["Kabaka Pyramid"]);
+    expect(artists([at("(((folkYEAH!))) Presents - The Lemon Twigs w/ Tchotchke")])).toEqual(["The Lemon Twigs"]);
+    expect(artists([at("WHY? with Kitty Ray")])).toEqual(["WHY?"]);
+    expect(artists([at("Cut Worms (solo)")])).toEqual(["Cut Worms"]);
+    expect(artists([at("An Evening With Karl Denson's AfroSonic")])).toEqual(["Karl Denson's AfroSonic"]);
+    expect(artists([at("Ovrkast. — Still Striking Tour")])).toEqual(["Ovrkast."]);
+  });
+
+  it("leaves out the venue's own nights and genres that do not suit the room", () => {
+    expect(artists([at("Listening Session", { venueName: "Wax Poetic Sound Society" })])).toEqual([]);
+    expect(artists([at("Conjurer", { genre: "Punk / Metal" })])).toEqual([]);
+    expect(artists([at("Conjurer", { genre: "Indie / Rock" })])).toEqual(["Conjurer"]);
+  });
+
+  it("keeps a watchlist act whatever its genre", () => {
+    const out = selectCandidates([at("Conjurer", { genre: "Punk / Metal" })], WAX_POETIC_RULES, NOW2, [{ artistKey: artistKey("Conjurer"), name: "Conjurer" }]);
+    expect(out.map((c) => [c.artist, c.origin])).toEqual([["Conjurer", "watchlist"]]);
   });
 });

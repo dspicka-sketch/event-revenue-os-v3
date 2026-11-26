@@ -6,7 +6,7 @@
 // "discovery v0": a starting proposal that the owner has not approved.
 
 // v0.1 (2026-11-16, owner): promoter billings stay in; cabaret rooms are reduced by one point.
-export const DISCOVERY_METHOD = "discovery v0.1";
+export const DISCOVERY_METHOD = "discovery v0.2";
 
 /** Relationship stages, in order. A person moves a candidate through them; the job never does. */
 export const CANDIDATE_STAGES = [
@@ -56,6 +56,8 @@ export interface DiscoveryRules {
   cabaretVenues: string[];
   /** Artist names that are never candidates (compared as artist keys). */
   excludedArtists: string[];
+  /** Lowercase genre labels that do not suit the room. Applies to small-room acts only; a watchlist act always stays. */
+  excludedGenres: string[];
   /** Seats in the room being booked. Not used in scoring yet; kept with the rules for economics. */
   roomSeats: number;
 }
@@ -64,9 +66,12 @@ export interface DiscoveryRules {
 export const WAX_POETIC_RULES: DiscoveryRules = {
   maxVenueCapacity: 600,
   windowDays: 90,
-  excludedVenues: ["hopmonk"],
+  // The venue's own nights are not booking candidates.
+  excludedVenues: ["hopmonk", "wax poetic"],
   cabaretVenues: ["feinstein"],
   excludedArtists: ["jason isbell", "chris thile"],
+  // A seated 60-seat listening room (session call, 2026-11-25; the owner can reverse it).
+  excludedGenres: ["punk / metal"],
   roomSeats: 60,
 };
 
@@ -99,9 +104,52 @@ export function artistKey(name: string): string {
     .trim();
 }
 
-/** "Ovrkast. — Still Striking Tour" → "Ovrkast." */
+/**
+ * Formats that are not a touring act to book (owner, 2026-11-25: keep music, comedy and touring
+ * performing arts that suit a 60-seat house; filter the rest). Matched on the listing title.
+ * Tribute acts are a session call the owner can reverse.
+ */
+const NON_TOURING_FORMATS: { label: string; pattern: RegExp }[] = [
+  { label: "karaoke or open mic", pattern: /\b(karaoke|open mic|open decks)\b/ },
+  { label: "bar crawl", pattern: /\b(pub|bar) crawl\b|\bsanta ?con\b/ },
+  { label: "dance or party night", pattern: /\b(rave|clubbing|disco|bingo|takeover|dance night|party|bash)\b/ },
+  { label: "themed night", pattern: /\b(night|nite)$|\b(emo|goth|throwback|[a-z0-9]+'s) night\b|\bnight tour\b/ },
+  { label: "tribute act", pattern: /\btribute\b|\bmusic of\b|\bthe [a-z ]+ experience$/ },
+  { label: "kids' series", pattern: /\bplayhouse\b/ },
+  { label: "festival or benefit", pattern: /\b(festival|[a-z]*fest|benefit|for a cause)\b/ },
+  { label: "shared local bill", pattern: /\bdouble bill\b/ },
+];
+
+/** Why a listing is not a touring act to book, or null when it may be one. */
+export function nonTouringFormat(headliner: string): string | null {
+  const title = headliner.normalize("NFKC").toLowerCase().replace(/[’`]/g, "'").replace(/\s*\([^)]*\)\s*/g, " ").replace(/[!.\s]+$/g, "").trim();
+  // Comedy stays in, including a room's own comedy night (owner, 2026-11-25).
+  const comedy = /\bcomedy\b/.test(title);
+  for (const f of NON_TOURING_FORMATS) if (!(comedy && f.label === "themed night") && f.pattern.test(title)) return f.label;
+  // Three or more acts billed before any "with" or "w/" is a shared bill, not one act's tour date.
+  const acts = headlineBilling(headliner).split(ACT_SEPARATOR).filter((x) => x.trim());
+  return acts.length >= 3 ? "shared local bill" : null;
+}
+
+const ACT_SEPARATOR = /,\s+|\s*\/\s+|\s+\+\s+/;
+const SUPPORT_MARKER = /\s+[—–-]\s+|:\s+|\s+w\/\s*|\s+with\s+|\s+(?:feat\.?|ft\.?|featuring)\s+/i;
+
+/** The top-billed part of a listing: presenter and parentheticals removed, cut at the first support or subtitle marker. */
+function headlineBilling(headliner: string): string {
+  const act = stripPresenter(headliner).replace(/\s*\([^)]*\)/g, "");
+  return (act.split(SUPPORT_MARKER)[0] ?? act).trim();
+}
+
+/** "Moe's Alley Presents: Ana Popovic" → "Ana Popovic". A presenter billing keeps its act (owner, 2026-11-16). */
+function stripPresenter(headliner: string): string {
+  const m = headliner.match(/^.*?\bpresents?\b\s*[:—–-]?\s*(.+)$/i);
+  return (m?.[1] ?? headliner).replace(/^an evening with\s+/i, "").trim();
+}
+
+/** "Ovrkast. — Still Striking Tour" → "Ovrkast."; "WHY? with Kitty Ray" → "WHY?"; "Cut Worms (solo)" → "Cut Worms". */
 function cleanHeadliner(headliner: string): string {
-  return (headliner.split(/\s+[—–-]\s+|:\s+/)[0] ?? headliner).trim();
+  const first = (headlineBilling(headliner).split(ACT_SEPARATOR)[0] ?? "").replace(/\s+tour$/i, "").trim();
+  return first || headliner.trim();
 }
 
 /** A one-word watch name must equal the billed name; longer names may sit inside a longer billing. */
@@ -134,6 +182,7 @@ export function selectCandidates(shows: AreaShow[], rules: DiscoveryRules, now: 
     if (!Number.isFinite(at) || at <= from || at > until) continue;
     const venue = show.venueName.toLowerCase();
     if (rules.excludedVenues.some((v) => venue.includes(v))) continue;
+    if (nonTouringFormat(show.headliner)) continue;
 
     const billed = cleanHeadliner(show.headliner);
     const billedKey = artistKey(billed);
@@ -151,6 +200,7 @@ export function selectCandidates(shows: AreaShow[], rules: DiscoveryRules, now: 
     }
     if (headlinerWatched || !billedKey || isExcluded(billedKey) || isExcluded(fullKey)) continue;
     if (show.venueCapacity === null || show.venueCapacity > rules.maxVenueCapacity) continue;
+    if (show.genre && rules.excludedGenres.includes(show.genre.toLowerCase())) continue;
     hits.push({ key: billedKey, artist: billed, origin: "small_room", show, supporting: null });
   }
 
