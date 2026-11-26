@@ -64,3 +64,9 @@ Give the owner and a remote team member a working preview that shows real, usefu
 | 2026-11-25 | REJECTED | Reading "fewest approvals" as covering production deploy, merge to `main`, further spend or new secrets | Standing policy 3 and CLAUDE.md reserve these for the owner, case by case |
 | 2026-11-25 | ESCALATED | E-004: add this branch to the merge-order question | Stacked on an unmerged branch and edits files it shares |
 | 2026-11-25 | ESCALATED | E-005: paid service, secrets on the production target, accounts, portfolio register | PM must escalate paid services, secrets and anything production-facing even when the owner has already decided |
+
+## Owner decisions, 2026-11-26 (as given in chat)
+- Punk / Metal stays excluded: confirmed.
+- Tribute acts: include. The v0.2 tribute rule is removed.
+- Bills of three or more acts: include. The v0.2 shared-bill rule is removed; a bill is listed under its first act.
+- Method bumped to discovery v0.3. `npm run check` with `TEST_DATABASE_URL`: 200 of 200 passed.

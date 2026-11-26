@@ -6,7 +6,7 @@
 // "discovery v0": a starting proposal that the owner has not approved.
 
 // v0.1 (2026-11-16, owner): promoter billings stay in; cabaret rooms are reduced by one point.
-export const DISCOVERY_METHOD = "discovery v0.2";
+export const DISCOVERY_METHOD = "discovery v0.3";
 
 /** Relationship stages, in order. A person moves a candidate through them; the job never does. */
 export const CANDIDATE_STAGES = [
@@ -70,7 +70,7 @@ export const WAX_POETIC_RULES: DiscoveryRules = {
   excludedVenues: ["hopmonk", "wax poetic"],
   cabaretVenues: ["feinstein"],
   excludedArtists: ["jason isbell", "chris thile"],
-  // A seated 60-seat listening room (session call, 2026-11-25; the owner can reverse it).
+  // Not punk or metal in a seated 60-seat listening room (owner confirmed, 2026-11-26).
   excludedGenres: ["punk / metal"],
   roomSeats: 60,
 };
@@ -107,17 +107,15 @@ export function artistKey(name: string): string {
 /**
  * Formats that are not a touring act to book (owner, 2026-11-25: keep music, comedy and touring
  * performing arts that suit a 60-seat house; filter the rest). Matched on the listing title.
- * Tribute acts are a session call the owner can reverse.
+ * Tribute acts and bills of several acts stay in (owner, 2026-11-26); a shared bill is listed under its first act.
  */
 const NON_TOURING_FORMATS: { label: string; pattern: RegExp }[] = [
   { label: "karaoke or open mic", pattern: /\b(karaoke|open mic|open decks)\b/ },
   { label: "bar crawl", pattern: /\b(pub|bar) crawl\b|\bsanta ?con\b/ },
   { label: "dance or party night", pattern: /\b(rave|clubbing|disco|bingo|takeover|dance night|party|bash)\b/ },
   { label: "themed night", pattern: /\b(night|nite)$|\b(emo|goth|throwback|[a-z0-9]+'s) night\b|\bnight tour\b/ },
-  { label: "tribute act", pattern: /\btribute\b|\bmusic of\b|\bthe [a-z ]+ experience$/ },
   { label: "kids' series", pattern: /\bplayhouse\b/ },
   { label: "festival or benefit", pattern: /\b(festival|[a-z]*fest|benefit|for a cause)\b/ },
-  { label: "shared local bill", pattern: /\bdouble bill\b/ },
 ];
 
 /** Why a listing is not a touring act to book, or null when it may be one. */
@@ -126,9 +124,7 @@ export function nonTouringFormat(headliner: string): string | null {
   // Comedy stays in, including a room's own comedy night (owner, 2026-11-25).
   const comedy = /\bcomedy\b/.test(title);
   for (const f of NON_TOURING_FORMATS) if (!(comedy && f.label === "themed night") && f.pattern.test(title)) return f.label;
-  // Three or more acts billed before any "with" or "w/" is a shared bill, not one act's tour date.
-  const acts = headlineBilling(headliner).split(ACT_SEPARATOR).filter((x) => x.trim());
-  return acts.length >= 3 ? "shared local bill" : null;
+  return null;
 }
 
 const ACT_SEPARATOR = /,\s+|\s*\/\s+|\s+\+\s+/;

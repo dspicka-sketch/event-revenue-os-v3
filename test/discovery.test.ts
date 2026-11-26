@@ -74,7 +74,7 @@ describe("underplay discovery rules", () => {
   });
 
   it("names the scoring method version", () => {
-    expect(DISCOVERY_METHOD).toBe("discovery v0.2");
+    expect(DISCOVERY_METHOD).toBe("discovery v0.3");
   });
 
   it("treats differently cased and punctuated names as one artist", () => {
@@ -154,7 +154,7 @@ describe("lead time flag", () => {
   });
 });
 
-describe("touring-format filter (v0.2)", () => {
+describe("touring-format filter", () => {
   const NOW2 = new Date("2026-11-26T00:00:00Z");
   const at = (headliner: string, over: Partial<AreaShow> = {}): AreaShow => ({
     sourceEventId: headliner, headliner, support: [], venueName: "Room", city: "San Francisco", venueCapacity: 300,
@@ -165,7 +165,7 @@ describe("touring-format filter (v0.2)", () => {
   it("drops formats that are not a touring act", () => {
     for (const t of ["Karaoke Tuesday", "Open Mic Night", "The Official Santa Con SF Bar Crawl", "2000's Night", "The Emo Night Tour", "Kawaii Rave",
       "Gimme Gimme Disco", "Moe's Alley's NYE Bash with Wooster!", "The Rock and Roll Playhouse: Music of Bob Marley", "Big Bad Bitchfest 3 (Night 1)",
-      "Country For A Cause: A Benefit for the Food Bank", "Cartoon Hearts/ Amity St./ Trip Drive/ Zacc & The Scissorlips", "Mikey Vee, Lyka B, Solus The Happy Human"]) {
+      "Country For A Cause: A Benefit for the Food Bank"]) {
       expect(nonTouringFormat(t), t).not.toBeNull();
     }
     expect(artists([at("Karaoke Tuesday"), at("Kawaii Rave")])).toEqual([]);
@@ -178,9 +178,14 @@ describe("touring-format filter (v0.2)", () => {
     }
   });
 
-  it("names tribute acts as their own removable rule", () => {
-    expect(nonTouringFormat("Valerie: A Tribute to Amy Winehouse")).toBe("tribute act");
-    expect(nonTouringFormat("Strangelove: The Depeche Mode Experience")).toBe("tribute act");
+  it("keeps tribute acts and bills of several acts, listing a shared bill under its first act (owner, 2026-11-26)", () => {
+    for (const t of ["Valerie: A Tribute to Amy Winehouse", "Strangelove: The Depeche Mode Experience", "Mikey Vee, Lyka B, Solus The Happy Human",
+      "Cartoon Hearts/ Amity St./ Trip Drive/ Zacc & The Scissorlips", "Moe's Alley Presents a Double Bill with Anthony Arya & Anthony Cullins"]) {
+      expect(nonTouringFormat(t), t).toBeNull();
+    }
+    expect(artists([at("Mikey Vee, Lyka B, Solus The Happy Human")])).toEqual(["Mikey Vee"]);
+    expect(artists([at("Cartoon Hearts/ Amity St./ Trip Drive/ Zacc & The Scissorlips")])).toEqual(["Cartoon Hearts"]);
+    expect(artists([at("Valerie: A Tribute to Amy Winehouse")])).toEqual(["Valerie"]);
   });
 
   it("reads the act out of presenter billings, support lines and tour titles", () => {
