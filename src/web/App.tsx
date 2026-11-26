@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { CurrencyRevenue, ReconciliationRow, RevenueException } from "../domain/revenue.js";
 import { currencyScale, parseMoneyInput, type Measure } from "../domain/money.js";
+import type { UnderplayEstimate, UnderplayFit } from "../domain/underplay.js";
 import { CHANNEL_LABELS, CHANNELS, type Channel, type MoneyByCurrency } from "../domain/marketing.js";
 import { TARGET_LABELS, type AttentionItem, type ShowCard, type TargetProgress } from "../domain/pulse.js";
 import {
@@ -767,6 +768,25 @@ const STAGE_LABEL: Record<CandidateStageDto, string> = {
 const ORIGIN_LABEL: Record<CandidateDto["origin"], string> = { watchlist: "Watchlist", small_room: "Small room nearby" };
 const SHOW_STATUS_LABEL: Record<string, string> = { onsale: "On sale", low: "Low tickets", soldout: "Sold out", cancelled: "Cancelled", postponed: "Postponed" };
 
+const FIT_LABEL: Record<UnderplayFit, string> = { fits: "Fits", stretch: "Stretch", over: "Over ceiling", unknown: "No estimate" };
+const FIT_TAG: Record<UnderplayFit, string> = { fits: "tag ok", stretch: "tag partial", over: "tag neutral", unknown: "tag neutral" };
+
+/** One candidate's deal estimate. Every figure comes from the API; nothing is calculated here. */
+function DealEstimate({ e }: { e: UnderplayEstimate | null }) {
+  if (!e) return <span className="small muted">Support slot: priced on the headliner, so no estimate.</span>;
+  if (e.fit === "unknown" || e.neededFaceLowMinor === null || e.neededFaceHighMinor === null || e.supportedFaceMinor === null || !e.offer) {
+    return <><span className={FIT_TAG.unknown}>{FIT_LABEL.unknown}</span><div className="small muted">No listed price or room size.</div></>;
+  }
+  const m = (minor: number) => formatMoney(minor, e.currency);
+  return (
+    <>
+      <span className={FIT_TAG[e.fit]}>{FIT_LABEL[e.fit]}</span>
+      <div className="small">Needs {m(e.neededFaceLowMinor)} to {m(e.neededFaceHighMinor)} · fans may pay {m(e.supportedFaceMinor)}</div>
+      <div className="small muted">At {m(e.offer.faceMinor)}: guarantee {m(e.offer.guaranteeMinor)}, sellout {m(e.offer.artistAtSelloutMinor)}</div>
+    </>
+  );
+}
+
 /** Only http(s) links from the area calendar are rendered as links. */
 function safeHttpUrl(url: string | null): string | null {
   if (!url) return null;
@@ -808,6 +828,14 @@ function DiscoveryPage({ org, onAuth }: { org: Organization; onAuth: () => void 
           <input type="checkbox" checked={showDismissed} onChange={(e) => setShowDismissed(e.target.checked)} /> Show dismissed
         </label>
       </div>
+      <p className="small muted">
+        Deal estimate, per ticket at face value: {data.underplayModel.roomSeats} seats, {data.underplayModel.guaranteeShareBp / 100}% of gross potential guaranteed,
+        then 100% to the artist after show costs and a {data.underplayModel.promoterProfitBp / 100}% promoter profit. "Needs" is the price that matches the act's usual night,
+        from {data.underplayModel.sellThroughLowBp / 100}% sold to a sellout of its usual room at {data.underplayModel.artistDoorShareBp / 100}% of the door.
+        Two inputs are assumptions you have not confirmed: show costs of {formatMoney(data.underplayModel.showCostsMinor, data.underplayModel.currency)},
+        and fans paying up to {data.underplayModel.supportedMultipleBp / 10000} times the usual ticket (never above {formatMoney(data.underplayModel.ceilingFaceMinor, data.underplayModel.currency)}).
+        Listed prices may include fees. These are estimates for choosing who to approach, not revenue or settlement figures.
+      </p>
       {saveError && <ErrorBox title="Could not save the change" detail={saveError} />}
       {rows.length === 0 ? (
         <div className="card">
@@ -818,7 +846,7 @@ function DiscoveryPage({ org, onAuth }: { org: Organization; onAuth: () => void 
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>Artist</th><th>Next area show</th><th className="num">Room</th><th className="num">Days out</th><th className="num">Score</th><th>Why</th><th>Stage</th>{canEdit && <th><span className="sr-only">Actions</span></th>}</tr>
+              <tr><th>Artist</th><th>Next area show</th><th className="num">Room</th><th className="num">Days out</th><th className="num">Score</th><th>Deal estimate</th><th>Why</th><th>Stage</th>{canEdit && <th><span className="sr-only">Actions</span></th>}</tr>
             </thead>
             <tbody>
               {rows.map((c) => {
@@ -840,6 +868,7 @@ function DiscoveryPage({ org, onAuth }: { org: Organization; onAuth: () => void 
                       {c.shortLead && c.daysUntilShow >= 0 && <div><span className="tag partial" title="Under 30 days: logistics are tight. Sales for a small underplay can still be fast.">Short lead</span></div>}
                     </td>
                     <td className="num">{c.score}</td>
+                    <td><DealEstimate e={c.underplay} /></td>
                     <td className="small">{c.reasons.join(" · ")}</td>
                     <td>
                       {canEdit ? (

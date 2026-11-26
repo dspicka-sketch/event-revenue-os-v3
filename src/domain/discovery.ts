@@ -6,7 +6,10 @@
 // "discovery v0": a starting proposal that the owner has not approved.
 
 // v0.1 (2026-11-16, owner): promoter billings stay in; cabaret rooms are reduced by one point.
-export const DISCOVERY_METHOD = "discovery v0.3";
+import { formatMoney } from "./money.js";
+import { estimateUnderplay, WAX_POETIC_UNDERPLAY, type UnderplayRules } from "./underplay.js";
+
+export const DISCOVERY_METHOD = "discovery v0.4";
 
 /** Relationship stages, in order. A person moves a candidate through them; the job never does. */
 export const CANDIDATE_STAGES = [
@@ -14,6 +17,9 @@ export const CANDIDATE_STAGES = [
   "offer_submitted", "negotiation", "booked", "repeat_artist", "long_term_relationship",
 ] as const;
 export type CandidateStage = (typeof CANDIDATE_STAGES)[number];
+
+/** Start of the reason given to an act found as support on someone else's show. */
+export const SUPPORTING_PREFIX = "supporting ";
 
 /**
  * Lead time under which a booking is tight on logistics for the agent and the room.
@@ -58,6 +64,8 @@ export interface DiscoveryRules {
   excludedArtists: string[];
   /** Lowercase genre labels that do not suit the room. Applies to small-room acts only; a watchlist act always stays. */
   excludedGenres: string[];
+  /** Deal and ticket-price model for the fit estimate (D20). */
+  underplay: UnderplayRules;
   /** Seats in the room being booked. Not used in scoring yet; kept with the rules for economics. */
   roomSeats: number;
 }
@@ -72,6 +80,7 @@ export const WAX_POETIC_RULES: DiscoveryRules = {
   excludedArtists: ["jason isbell", "chris thile"],
   // Not punk or metal in a seated 60-seat listening room (owner confirmed, 2026-11-26).
   excludedGenres: ["punk / metal"],
+  underplay: WAX_POETIC_UNDERPLAY,
   roomSeats: 60,
 };
 
@@ -217,7 +226,7 @@ export function selectCandidates(shows: AreaShow[], rules: DiscoveryRules, now: 
     const reasons: string[] = [];
     let score = 0;
     if (origin === "watchlist") { score += 5; reasons.push("on your watchlist"); }
-    if (first.supporting) reasons.push(`supporting ${first.supporting}`);
+    if (first.supporting) reasons.push(`${SUPPORTING_PREFIX}${first.supporting}`);
     if (!first.supporting) {
       if (show.status === "soldout") { score += 3; reasons.push(`sold out at ${show.venueName}`); }
       else if (show.status === "low") { score += 2; reasons.push(`low tickets at ${show.venueName}`); }
@@ -227,6 +236,14 @@ export function selectCandidates(shows: AreaShow[], rules: DiscoveryRules, now: 
     if (dates > 1) { score += 1; reasons.push(`${dates} area dates`); }
     if (!first.supporting && show.priceMin !== null && show.priceMin >= 30) { score += 1; reasons.push(`tickets from $${show.priceMin}`); }
     if (!first.supporting && rules.cabaretVenues.some((v) => show.venueName.toLowerCase().includes(v))) { score -= 1; reasons.push("cabaret room (reduced)"); }
+    // Deal estimate (D20). A support slot is priced on the headliner, so it gets none.
+    if (!first.supporting) {
+      const e = estimateUnderplay(show, rules.underplay);
+      const money = (minor: number) => formatMoney(minor, e.currency);
+      if (e.fit === "fits") { score += 2; reasons.push(`deal fits: needs about ${money(e.neededFaceLowMinor!)}, fans may pay about ${money(e.supportedFaceMinor!)}`); }
+      else if (e.fit === "stretch") { score += 1; reasons.push(`deal is a stretch: needs about ${money(e.neededFaceLowMinor!)}, fans may pay about ${money(e.supportedFaceMinor!)}`); }
+      else if (e.fit === "over") reasons.push(`deal is over the ${money(rules.underplay.ceilingFaceMinor)} ceiling`);
+    }
     out.push({ artistKey: key, artist: (watchHit ?? first).artist, origin, anchorShow: show, score, reasons });
   }
 

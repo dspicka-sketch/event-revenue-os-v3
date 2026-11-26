@@ -88,7 +88,7 @@ describe("weekly digest", () => {
     expect(text).toContain("  - Act 9: The Chapel");
     expect(text).not.toContain("Act 10");
     expect(text).toContain("  ...and 2 more in the candidate list.");
-    expect(text).toContain("Scores use discovery v0.3, a starting method that has not been approved.");
+    expect(text).toContain("Scores use discovery v0.4, a starting method that has not been approved.");
   });
 
   it("says when there are no new candidates", () => {

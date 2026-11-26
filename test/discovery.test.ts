@@ -16,7 +16,7 @@ describe("underplay discovery rules", () => {
   it("keeps an on-sale show at a small room inside the window", () => {
     const out = pick([show()]);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ artist: "The Deslondes", artistKey: "the deslondes", origin: "small_room", score: 0, reasons: [] });
+    expect(out[0]).toMatchObject({ artist: "The Deslondes", artistKey: "the deslondes", origin: "small_room", score: 1, reasons: ["deal is a stretch: needs about $137.26, fans may pay about $62.50"] });
   });
 
   it("drops shows at venues above the capacity ceiling", () => {
@@ -48,25 +48,25 @@ describe("underplay discovery rules", () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.anchorShow.sourceEventId).toBe("soon");
     expect(out[0]!.reasons).toContain("2 area dates");
-    expect(out[0]!.score).toBe(1);
+    expect(out[0]!.score).toBe(2);
   });
 
-  it("scores a sold-out 250-capacity show at 5 with both reasons", () => {
+  it("scores a sold-out 250-capacity show at 5 for its signals, plus the deal point", () => {
     const out = pick([show({ status: "soldout", venueCapacity: 250, venueName: "The Chapel" })]);
-    expect(out[0]!.score).toBe(5);
-    expect(out[0]!.reasons).toEqual(["sold out at The Chapel", "plays rooms of 250"]);
+    expect(out[0]!.score).toBe(6);
+    expect(out[0]!.reasons).toEqual(["sold out at The Chapel", "plays rooms of 250", "deal is a stretch: needs about $78.44, fans may pay about $62.50"]);
   });
 
   it("adds a point for low tickets (2) and for a price of $30 or more (1)", () => {
     const out = pick([show({ status: "low", priceMin: 30 })]);
-    expect(out[0]!.score).toBe(3);
-    expect(out[0]!.reasons).toEqual(["low tickets at Mystic Theatre", "tickets from $30"]);
+    expect(out[0]!.score).toBe(4);
+    expect(out[0]!.reasons).toEqual(["low tickets at Mystic Theatre", "tickets from $30", "deal is a stretch: needs about $160.79, fans may pay about $75.00"]);
   });
 
   it("reduces a cabaret-room show by one point and says so", () => {
     const out = pick([show({ venueName: "Feinstein's at the Nikko", venueCapacity: 140, priceMin: 86 })]);
-    expect(out[0]!.score).toBe(2);
-    expect(out[0]!.reasons).toEqual(["plays rooms of 140", "tickets from $86", "cabaret room (reduced)"]);
+    expect(out[0]!.score).toBe(4);
+    expect(out[0]!.reasons).toEqual(["plays rooms of 140", "tickets from $86", "cabaret room (reduced)", "deal fits: needs about $132.93, fans may pay about $215.00"]);
   });
 
   it("keeps promoter billings as candidates", () => {
@@ -74,7 +74,7 @@ describe("underplay discovery rules", () => {
   });
 
   it("names the scoring method version", () => {
-    expect(DISCOVERY_METHOD).toBe("discovery v0.3");
+    expect(DISCOVERY_METHOD).toBe("discovery v0.4");
   });
 
   it("treats differently cased and punctuated names as one artist", () => {
@@ -206,5 +206,22 @@ describe("touring-format filter", () => {
   it("keeps a watchlist act whatever its genre", () => {
     const out = selectCandidates([at("Conjurer", { genre: "Punk / Metal" })], WAX_POETIC_RULES, NOW2, [{ artistKey: artistKey("Conjurer"), name: "Conjurer" }]);
     expect(out.map((c) => [c.artist, c.origin])).toEqual([["Conjurer", "watchlist"]]);
+  });
+});
+
+describe("deal estimate in scoring (v0.4)", () => {
+  it("adds nothing and says nothing when the listing has no price", () => {
+    const out = pick([show({ priceMin: null })]);
+    expect(out[0]).toMatchObject({ score: 0, reasons: [] });
+  });
+  it("says so, without points, when even the low needed price is over the ceiling", () => {
+    const out = pick([show({ venueCapacity: 600, priceMin: 80 })]);
+    expect(out[0]!.reasons).toContain("deal is over the $250.00 ceiling");
+    expect(out[0]!.score).toBe(1);
+  });
+  it("gives a support act no deal estimate, since the price is the headliner's", () => {
+    const out = pick([show({ headliner: "Big Name", support: ["Nora Brown"] })], [{ artistKey: artistKey("Nora Brown"), name: "Nora Brown" }]);
+    const nora = out.find((c) => c.artist === "Nora Brown")!;
+    expect(nora.reasons.some((x) => x.startsWith("deal "))).toBe(false);
   });
 });

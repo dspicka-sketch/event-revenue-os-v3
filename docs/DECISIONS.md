@@ -90,5 +90,14 @@ Daniel asked for automation on top of RevOS ("AutoRev") and approved it on 2026-
 - **This narrows an earlier line.** CLAUDE.md says RevOS is "not a CRM, booking system or marketing sender". With D19 it holds a booking *pipeline* and sends a digest to its own admins. It still makes no offers, sends no outreach and writes to no vendor. Deal terms and settlement stay with Prism.fm (D14).
 - **Not built here:** agent research and outreach drafts, RouteBuilder economics, the national monthly report, booking and show-day tasks.
 
+## D20 — Underplay deal estimate on discovery candidates (2026-11-26)
+Daniel asked for his underplay deal model and ticket-price logic to be added to discovery ("Add the model and price logic from earlier", 2026-11-26). This is a scoped exception to D14, which stands: real deal terms, budgets and settlements still come from Prism.
+- **What it is.** For each discovery candidate, an estimate of the face price his model needs against the price fans may pay, with a fit label (`fits`, `stretch`, `over`, `unknown`). Rules live in `src/domain/underplay.ts`.
+- **The model (Daniel, 2026-11-20).** Work back from gross potential. 60 seats. Guarantee 50% of gross potential. The artist takes 100% after break-even, where break-even is the guarantee, show costs and a 15% promoter profit on gross receipts. An act that fills its usual room keeps about 80% of that door. 250 a ticket is the ceiling. Facility and ticketing fees sit on top of face and are outside this math.
+- **"Needs".** The face price at which a sellout here pays the act what its usual night pays, from 60% sold to a sellout of its usual room.
+- **Two assumptions Daniel has not confirmed**, both named on screen: show costs of 1,000 per show, and fans paying up to 2.5 times the act's usual ticket. He said on 2026-11-20 that the math working does not mean people will pay; the multiple is a placeholder for that answer.
+- **Scoring (`discovery v0.4`).** `fits` adds 2 points, `stretch` adds 1, `over` adds none and says so. A support slot gets no estimate.
+- **Limits.** Missing price or room size is `unknown`, never zero. The listed price may include fees. Integer minor units. The estimate appears on discovery candidates only and never in revenue, reconciliation, targets or any actuals view.
+
 ## Proposed (not done)
 - A `financial_adjustments` table, deferred until a source exposes explicit refund/adjustment amounts. In M1, refunds come from order/line state.

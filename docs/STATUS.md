@@ -9,6 +9,16 @@ _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (s
 - Short-lead flag (`leadTime` in `src/domain/discovery.ts`): a candidate under 30 days out is flagged, never hidden and never down-ranked (owner, 2026-11-20). Exposed as `daysUntilShow` and `shortLead` on the candidate.
 - Verification: `npm run check` with `TEST_DATABASE_URL` on local PostgreSQL 16: 194 of 194 tests passed, typecheck and build clean, secret scan clean. Mobile unchanged and its checks not run.
 
+**Production (owner decision, 2026-11-26: "Move to production"):**
+- Vercel production is deployed from branch `claude/candidates-screen`, not from `main`. The deployed commit is recorded in this branch's session charter. A pull request to `main` is open and unmerged; merges await the owner (E-004 order: AutoRev line, then On The Stage, then PR #5).
+- One database: Supabase project `revos` serves production and previews. This is acceptable only while it holds no ticketing, marketing or patron data (E-005). Ask the owner before each migration; previews never migrate. Previews get their own database before any live source connects.
+- Scheduled jobs run on production only. Not yet observed: the first scheduled discovery run.
+
+**Deal estimate, discovery v0.4 (D20, owner 2026-11-26):**
+- `src/domain/underplay.ts`: the owner's underplay model as an estimate on each candidate: needed face price (low to high), the price fans may pay, a fit label and the offer at that price. `fits` adds 2 points, `stretch` adds 1.
+- Two inputs are unconfirmed assumptions and are labeled on the Discovery page: show costs of 1,000 and a 2.5 times price multiple.
+- Verification: `npm run check` with `TEST_DATABASE_URL`: 213 of 213 tests passed.
+
 **Discovery v0.3 filter (owner, 2026-11-25 and 2026-11-26):**
 - Keep music, comedy and touring performing arts that suit a 60-seat house. Tribute acts stay in. Bills of several acts stay in, listed under the first act.
 - `nonTouringFormat` drops karaoke and open mic, bar crawls, dance and party nights, themed nights, festivals and benefits, and kids' series. Comedy stays in, including a room's own comedy night.

@@ -70,3 +70,8 @@ Give the owner and a remote team member a working preview that shows real, usefu
 - Tribute acts: include. The v0.2 tribute rule is removed.
 - Bills of three or more acts: include. The v0.2 shared-bill rule is removed; a bill is listed under its first act.
 - Method bumped to discovery v0.3. `npm run check` with `TEST_DATABASE_URL`: 200 of 200 passed.
+
+## Owner decisions, 2026-11-26, second instruction (as given in chat)
+- "Move to production. Add the model and price logic from earlier."
+- Deal estimate added as D20 / discovery v0.4. `npm run check` with `TEST_DATABASE_URL`: 213 of 213 passed.
+- Portfolio-manager rulings applied: production deploys from this branch line only; PR to `main` stays open and unmerged; shared database conditions recorded in `docs/STATUS.md` (E-005).
