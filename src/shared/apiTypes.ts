@@ -1,6 +1,7 @@
 // HTTP API contract shared by the server, the desktop web client and the
 // mobile client. Dates are ISO-8601 strings on the wire.
 
+import type { UnderplayEstimate, UnderplayRules } from "../domain/underplay.js";
 import type { MeasureStatus } from "../domain/money.js";
 import type { OrgDriver, OrgMarketing, OrgPulse, ShowCard, Target, TargetMeasure } from "../domain/pulse.js";
 import type { EventRevenue, ReconciliationRow, SourceReportFigures } from "../domain/revenue.js";
@@ -127,4 +128,45 @@ export interface ApiErrorBody {
   error: string;
   message?: string;
   action?: string;
+}
+
+// ---- AutoRev underplay discovery (D19)
+
+export type CandidateOriginDto = "watchlist" | "small_room";
+export type CandidateStageDto =
+  | "research" | "representation_identified" | "initial_outreach" | "conversation_started" | "routing_discussion"
+  | "offer_submitted" | "negotiation" | "booked" | "repeat_artist" | "long_term_relationship";
+
+export interface CandidateDto {
+  id: string;
+  artist: string;
+  origin: CandidateOriginDto;
+  stage: CandidateStageDto;
+  dismissed: boolean;
+  /** Sum of plain signals. The weights are an unapproved starting proposal (see `method`). */
+  score: number;
+  reasons: string[];
+  /** The act's soonest qualifying area show when last seen. */
+  anchor: { headliner: string; venueName: string; city: string; venueCapacity: number | null; startsAt: string; status: string; ticketUrl: string | null };
+  /**
+   * Deal estimate for a booking prospect (D20): what the owner's underplay model needs against what fans may pay.
+   * An estimate only, never revenue or a settlement. Null when the act was found as support on another act's show.
+   */
+  underplay: UnderplayEstimate | null;
+  /** Whole days from the server's clock until the anchor show starts. */
+  daysUntilShow: number;
+  /** Under 30 days out: logistics are tight. A flag only; it never hides or down-ranks a candidate. */
+  shortLead: boolean;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  stageChangedAt: string | null;
+  notes: string | null;
+}
+
+export interface DiscoveryResponse {
+  /** Scoring method version, e.g. "discovery v0.4". */
+  method: string;
+  candidates: CandidateDto[];
+  /** The rules behind every candidate's deal estimate, so clients state the model and its assumptions without re-deriving them. */
+  underplayModel: UnderplayRules;
 }

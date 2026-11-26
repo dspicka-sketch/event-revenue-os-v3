@@ -2,6 +2,70 @@
 
 _Last updated: 2026-10-21. Scope: desktop web app + mobile app on one backend (see ROADMAP.md). Live verification: BLOCKED._
 
+## Discovery screen and preview environment, branch `claude/candidates-screen` (2026-11-25)
+
+**Built and tested:**
+- Desktop Discovery page (`/orgs/:orgId/discovery`): candidates with the anchor show in the venue timezone, room capacity, days out, score and reasons, stage, and a show-dismissed toggle. Admins change stage and dismiss or restore; viewers read only. It renders only what the discovery API returns.
+- Short-lead flag (`leadTime` in `src/domain/discovery.ts`): a candidate under 30 days out is flagged, never hidden and never down-ranked (owner, 2026-11-20). Exposed as `daysUntilShow` and `shortLead` on the candidate.
+- Verification: `npm run check` with `TEST_DATABASE_URL` on local PostgreSQL 16: 194 of 194 tests passed, typecheck and build clean, secret scan clean. Mobile unchanged and its checks not run.
+
+**Production (owner decision, 2026-11-26: "Move to production"):**
+- Vercel production is deployed from branch `claude/candidates-screen`, not from `main`. The deployed commit is recorded in this branch's session charter. A pull request to `main` is open and unmerged; merges await the owner (E-004 order: AutoRev line, then On The Stage, then PR #5).
+- One database: Supabase project `revos` serves production and previews. This is acceptable only while it holds no ticketing, marketing or patron data (E-005). Ask the owner before each migration; previews never migrate. Previews get their own database before any live source connects.
+- Scheduled jobs run on production only. Not yet observed: the first scheduled discovery run.
+
+**Deal estimate, discovery v0.4 (D20, owner 2026-11-26):**
+- `src/domain/underplay.ts`: the owner's underplay model as an estimate on each candidate: needed face price (low to high), the price fans may pay, a fit label and the offer at that price. `fits` adds 2 points, `stretch` adds 1.
+- Two inputs are unconfirmed assumptions and are labeled on the Discovery page: show costs of 1,000 and a 2.5 times price multiple.
+- Verification: `npm run check` with `TEST_DATABASE_URL`: 213 of 213 tests passed.
+
+**Discovery v0.3 filter (owner, 2026-11-25 and 2026-11-26):**
+- Keep music, comedy and touring performing arts that suit a 60-seat house. Tribute acts stay in. Bills of several acts stay in, listed under the first act.
+- `nonTouringFormat` drops karaoke and open mic, bar crawls, dance and party nights, themed nights, festivals and benefits, and kids' series. Comedy stays in, including a room's own comedy night.
+- The act is read out of presenter billings ("Moe's Alley Presents: X"), support lines ("X w/ Y") and tour titles.
+- The venue's own nights are excluded. Punk / Metal is excluded for small-room acts (owner confirmed 2026-11-26); a watchlist act always stays.
+- v0.2 (2026-11-25) had also dropped tribute acts and bills of three or more acts as session calls; the owner reversed both.
+- Verification: `npm run check` with `TEST_DATABASE_URL`: 200 of 200 tests passed.
+
+**Preview environment (owner approved 2026-11-25):**
+- New Supabase project `revos` (us-east-1). The app connects as its own role, `revos_app`; every table has row level security on with no policies, so Supabase's public data API cannot read them.
+- Migrations 001 to 010 applied and the fixture organization seeded there. Vercel `DATABASE_URL` (production and preview) points at it through the transaction pooler.
+- A live organization "Wax Poetic" exists for discovery. No ticketing or marketing source is connected to it.
+
+**Not done:**
+- The deal model and artist-fit rules from 2026-11-20 are not in the scoring. Ticket price (what fans will pay) is still open with the owner.
+- No mobile Discovery screen.
+- Vercel cron schedules run only on production deployments, and nothing is deployed to production. On previews the discovery job runs only when called by hand.
+- On The Stage data path still unknown (D18 questions unanswered); Mailchimp and Resend keys not set.
+- When the database is unreachable the API returns the raw database error text to the client. To fix.
+
+## AutoRev (D19), branch `claude/autorev-sprint-1` (2026-11-16)
+
+**Built and tested (no live run yet):**
+- Underplay discovery rules (`src/domain/discovery.ts`): small-room acts and watchlist matches from area shows, one candidate per act, transparent score with reasons (`discovery v0.1`, unapproved).
+- Read-only Bay Shows reader, watchlist and candidate pipeline tables (ten relationship stages plus dismissal), candidate API.
+- Daily sync sweep over live shows, automation run log, Resend email sender, weekly digest text, sync-failure alert email.
+- Three bearer-protected cron routes and their Vercel schedule.
+
+**Verification actually performed (2026-11-16, cloud build environment):**
+
+| Check | Result |
+|---|---|
+| `npm run check` with local PostgreSQL 16 | typecheck OK; **189/189 tests** (108 existing + 81 new); web build OK; secret/PII scan clean |
+| Bay Shows REST read | **Live read OK**: two paged requests answered HTTP 200 with distinct rows |
+| Eventbrite and Ticketmaster reachability | Both answered HTTP 401 without a key, so the network block recorded on 2026-10-21 did not occur in this environment |
+
+**Not verified:** any deployed run; a real Resend send; a real Eventbrite read; Vercel actually invoking the schedules; the mobile and desktop clients (no UI was added for candidates). No security scan was run (no StackHawk key in the environment).
+
+**Independent review (2026-11-16):** one fresh reviewer read the whole branch. No critical findings; cron authentication and tenant isolation held under probing. Five findings were fixed test-first (duplicate candidate for a watched act billed with extra words; excluded artist billed with a band name; discovery run left "running" on failure; undelivered sync alert answered 200; "no admin email" not recorded). Open, by decision: an event with two live mappings is swept twice; the same show from two sources counts as two area dates; non-Latin artist names are dropped and "(Live)" suffixes split an act; unexpected error text is passed through to admins; a retried digest can be sent twice; whether Vercel `schedules` send the `CRON_SECRET` bearer the way legacy `crons` do is unverified and is the first thing the live gate checks.
+
+**BLOCKED on the owner (live gate):**
+1. Approve and create a Supabase project for RevOS (billed on the Pro plan; confirm cost first), then `npm run db:migrate`.
+2. Set `DATABASE_URL`, `CRON_SECRET`, `BAYSHOWS_SUPABASE_URL`, `BAYSHOWS_SUPABASE_KEY`, `REVOS_DISCOVERY_ORG_ID`, `RESEND_API_KEY`, `REVOS_DIGEST_FROM` on the Vercel project. The Resend sending domain must be verified first.
+3. Create the Wax Poetic organization and an admin user; run `npm run watchlist:seed -- <orgId>`.
+4. For live sales data: an Eventbrite token from the account that owns the event, or the On The Stage path (D18).
+5. PM review, a portfolio decision on E-004 (merge order with PR #5 and the On The Stage branch), then merge.
+
 ## Completed
 
 ### M1: Desktop Eventbrite slice (code complete; live gate blocked)

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { CurrencyRevenue, ReconciliationRow, RevenueException } from "../domain/revenue.js";
 import { currencyScale, parseMoneyInput, type Measure } from "../domain/money.js";
+import type { UnderplayEstimate, UnderplayFit } from "../domain/underplay.js";
 import { CHANNEL_LABELS, CHANNELS, type Channel, type MoneyByCurrency } from "../domain/marketing.js";
 import { TARGET_LABELS, type AttentionItem, type ShowCard, type TargetProgress } from "../domain/pulse.js";
 import {
   api, ApiError, getToken, setToken,
-  type ConnectionsResponse, type EventDetailResponse, type MarketingSummary, type OrgMarketing, type EventDto, type MeResponse, type Organization, type PulseResponse, type TargetMeasure,
+  type CandidateDto, type CandidateStageDto, type ConnectionsResponse, type EventDetailResponse, type MarketingSummary, type OrgMarketing, type EventDto, type MeResponse, type Organization, type PulseResponse, type TargetMeasure,
 } from "./api.js";
 import { fmtDateTime, fmtMeasure, fmtRelative, formatMoney } from "./format.js";
 import { PaceChart } from "./PaceChart.js";
@@ -16,11 +17,14 @@ type Route =
   | { page: "home" }
   | { page: "org"; orgId: string }
   | { page: "integrations"; orgId: string }
+  | { page: "discovery"; orgId: string }
   | { page: "event"; orgId: string; eventId: string };
 
 function parseRoute(path: string): Route {
   let m = path.match(/^\/orgs\/([^/]+)\/integrations\/?$/);
   if (m) return { page: "integrations", orgId: m[1]! };
+  m = path.match(/^\/orgs\/([^/]+)\/discovery\/?$/);
+  if (m) return { page: "discovery", orgId: m[1]! };
   m = path.match(/^\/orgs\/([^/]+)(?:\/events\/([^/]+))?\/?$/);
   if (!m) return { page: "home" };
   return m[2] ? { page: "event", orgId: m[1]!, eventId: m[2] } : { page: "org", orgId: m[1]! };
@@ -104,6 +108,7 @@ export function App() {
         {org && (
           <nav className="tabs" aria-label="Sections">
             <Link to={`/orgs/${org.id}`} go={go} current={route.page === "org" || route.page === "event"}>Shows</Link>
+            <Link to={`/orgs/${org.id}/discovery`} go={go} current={route.page === "discovery"}>Discovery</Link>
             <Link to={`/orgs/${org.id}/integrations`} go={go} current={route.page === "integrations"}>Integrations</Link>
           </nav>
         )}
@@ -121,6 +126,7 @@ export function App() {
           : route.page === "org" ? <EventList org={org!} go={go} onAuth={onAuthLost} />
           : route.page === "event" ? <EventPage org={org!} eventId={route.eventId} go={go} onAuth={onAuthLost} />
           : route.page === "integrations" ? <IntegrationsPage org={org!} onAuth={onAuthLost} />
+          : route.page === "discovery" ? <DiscoveryPage org={org!} onAuth={onAuthLost} />
           : null}
       </main>
     </div>
@@ -748,6 +754,137 @@ function IntegrationsPage({ org, onAuth }: { org: Organization; onAuth: () => vo
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ discovery
+
+const STAGE_LABEL: Record<CandidateStageDto, string> = {
+  research: "Research", representation_identified: "Agent identified", initial_outreach: "Initial outreach",
+  conversation_started: "Conversation started", routing_discussion: "Routing discussion", offer_submitted: "Offer submitted",
+  negotiation: "Negotiation", booked: "Booked", repeat_artist: "Repeat artist", long_term_relationship: "Long-term relationship",
+};
+const ORIGIN_LABEL: Record<CandidateDto["origin"], string> = { watchlist: "Watchlist", small_room: "Small room nearby" };
+const SHOW_STATUS_LABEL: Record<string, string> = { onsale: "On sale", low: "Low tickets", soldout: "Sold out", cancelled: "Cancelled", postponed: "Postponed" };
+
+const FIT_LABEL: Record<UnderplayFit, string> = { fits: "Fits", stretch: "Stretch", over: "Over ceiling", unknown: "No estimate" };
+const FIT_TAG: Record<UnderplayFit, string> = { fits: "tag ok", stretch: "tag partial", over: "tag neutral", unknown: "tag neutral" };
+
+/** One candidate's deal estimate. Every figure comes from the API; nothing is calculated here. */
+function DealEstimate({ e }: { e: UnderplayEstimate | null }) {
+  if (!e) return <span className="small muted">Support slot: priced on the headliner, so no estimate.</span>;
+  if (e.fit === "unknown" || e.neededFaceLowMinor === null || e.neededFaceHighMinor === null || e.supportedFaceMinor === null || !e.offer) {
+    return <><span className={FIT_TAG.unknown}>{FIT_LABEL.unknown}</span><div className="small muted">No listed price or room size.</div></>;
+  }
+  const m = (minor: number) => formatMoney(minor, e.currency);
+  return (
+    <>
+      <span className={FIT_TAG[e.fit]}>{FIT_LABEL[e.fit]}</span>
+      <div className="small">Needs {m(e.neededFaceLowMinor)} to {m(e.neededFaceHighMinor)} · fans may pay {m(e.supportedFaceMinor)}</div>
+      <div className="small muted">At {m(e.offer.faceMinor)}: guarantee {m(e.offer.guaranteeMinor)}, sellout {m(e.offer.artistAtSelloutMinor)}</div>
+    </>
+  );
+}
+
+/** Only http(s) links from the area calendar are rendered as links. */
+function safeHttpUrl(url: string | null): string | null {
+  if (!url) return null;
+  try { const u = new URL(url); return u.protocol === "https:" || u.protocol === "http:" ? u.href : null; } catch { return null; }
+}
+
+function DiscoveryPage({ org, onAuth }: { org: Organization; onAuth: () => void }) {
+  const [showDismissed, setShowDismissed] = useState(false);
+  const { data, error, reload } = useLoad(() => api.discovery(org.id, showDismissed), onAuth, [org.id, showDismissed]);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const canEdit = org.role === "admin";
+
+  const change = async (id: string, body: { stage?: CandidateStageDto; dismissed?: boolean }) => {
+    setSaveError(null);
+    try {
+      await api.setCandidate(org.id, id, body);
+      reload();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return onAuth();
+      setSaveError((e as Error).message);
+    }
+  };
+
+  if (error) return <ErrorBox title="Could not load discovery" detail={error} />;
+  if (!data) return <p className="muted">Loading…</p>;
+  const rows = data.candidates;
+
+  return (
+    <section>
+      <div className="page-head with-action">
+        <div>
+          <h1>Discovery</h1>
+          <p className="muted">
+            Touring acts with an upcoming area show that could play an underplay here, read from the area calendar.
+            Ranked by plain signals ({data.method}); the weights are a starting proposal, not a prediction of sales.
+          </p>
+        </div>
+        <label className="row small">
+          <input type="checkbox" checked={showDismissed} onChange={(e) => setShowDismissed(e.target.checked)} /> Show dismissed
+        </label>
+      </div>
+      <p className="small muted">
+        Deal estimate, per ticket at face value: {data.underplayModel.roomSeats} seats, {data.underplayModel.guaranteeShareBp / 100}% of gross potential guaranteed,
+        then 100% to the artist after show costs and a {data.underplayModel.promoterProfitBp / 100}% promoter profit. "Needs" is the price that matches the act's usual night,
+        from {data.underplayModel.sellThroughLowBp / 100}% sold to a sellout of its usual room at {data.underplayModel.artistDoorShareBp / 100}% of the door.
+        Two inputs are assumptions you have not confirmed: show costs of {formatMoney(data.underplayModel.showCostsMinor, data.underplayModel.currency)},
+        and fans paying up to {data.underplayModel.supportedMultipleBp / 10000} times the usual ticket (never above {formatMoney(data.underplayModel.ceilingFaceMinor, data.underplayModel.currency)}).
+        Listed prices may include fees. These are estimates for choosing who to approach, not revenue or settlement figures.
+      </p>
+      {saveError && <ErrorBox title="Could not save the change" detail={saveError} />}
+      {rows.length === 0 ? (
+        <div className="card">
+          <strong>No candidates yet.</strong>
+          <div className="small muted">Discovery fills this list when its scheduled job runs against the area calendar. Nothing here is invented or sample data.</div>
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr><th>Artist</th><th>Next area show</th><th className="num">Room</th><th className="num">Days out</th><th className="num">Score</th><th>Deal estimate</th><th>Why</th><th>Stage</th>{canEdit && <th><span className="sr-only">Actions</span></th>}</tr>
+            </thead>
+            <tbody>
+              {rows.map((c) => {
+                const link = safeHttpUrl(c.anchor.ticketUrl);
+                return (
+                  <tr key={c.id} className={c.dismissed ? "dismissed" : undefined}>
+                    <th scope="row">
+                      {c.artist}
+                      <div className="small"><span className={c.origin === "watchlist" ? "tag ok" : "tag neutral"}>{ORIGIN_LABEL[c.origin]}</span>{c.dismissed && <> <span className="tag neutral">Dismissed</span></>}</div>
+                    </th>
+                    <td>
+                      {fmtDateTime(c.anchor.startsAt, org.timezone)}
+                      <div className="small muted">{c.anchor.venueName}, {c.anchor.city} · {SHOW_STATUS_LABEL[c.anchor.status] ?? c.anchor.status}</div>
+                      {link && <div className="small"><a href={link} target="_blank" rel="noreferrer noopener">Show listing</a></div>}
+                    </td>
+                    <td className="num">{c.anchor.venueCapacity === null ? "Unknown" : c.anchor.venueCapacity.toLocaleString("en-US")}</td>
+                    <td className="num">
+                      {c.daysUntilShow < 0 ? "Past" : c.daysUntilShow}
+                      {c.shortLead && c.daysUntilShow >= 0 && <div><span className="tag partial" title="Under 30 days: logistics are tight. Sales for a small underplay can still be fast.">Short lead</span></div>}
+                    </td>
+                    <td className="num">{c.score}</td>
+                    <td><DealEstimate e={c.underplay} /></td>
+                    <td className="small">{c.reasons.join(" · ")}</td>
+                    <td>
+                      {canEdit ? (
+                        <select aria-label={`Stage for ${c.artist}`} value={c.stage} onChange={(e) => change(c.id, { stage: e.target.value as CandidateStageDto })}>
+                          {(Object.keys(STAGE_LABEL) as CandidateStageDto[]).map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+                        </select>
+                      ) : STAGE_LABEL[c.stage]}
+                    </td>
+                    {canEdit && <td><button className="link" onClick={() => change(c.id, { dismissed: !c.dismissed })}>{c.dismissed ? "Restore" : "Dismiss"}</button></td>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

@@ -1,6 +1,6 @@
 // Browser API client. Talks only to the RevOS server; never to vendor APIs.
 import type {
-  ConnectionsResponse, EventDetailResponse, EventsResponse, LoginResponse, MeResponse, PulseResponse, RefreshResponse, TargetRequest,
+  CandidateStageDto, ConnectionsResponse, DiscoveryResponse, EventDetailResponse, EventsResponse, LoginResponse, MeResponse, PulseResponse, RefreshResponse, TargetRequest,
 } from "../shared/apiTypes.js";
 
 export type * from "../shared/apiTypes.js";
@@ -46,6 +46,10 @@ export const api = {
     call<{ ok: true }>(`/api/orgs/${orgId}/tracking-links/${encodeURIComponent(code)}`, json("PUT", { label, channel })),
   setSpend: (orgId: string, eventId: string, code: string, currency: string, amountMinor: number | null) =>
     call<{ ok: true }>(`/api/orgs/${orgId}/events/${eventId}/marketing-spend/${encodeURIComponent(code)}`, json("PUT", { amountMinor, currency })),
+  discovery: (orgId: string, includeDismissed: boolean) =>
+    call<DiscoveryResponse>(`/api/orgs/${orgId}/discovery${includeDismissed ? "?include=dismissed" : ""}`),
+  setCandidate: (orgId: string, id: string, change: { stage?: CandidateStageDto; dismissed?: boolean }) =>
+    call<{ ok: true }>(`/api/orgs/${orgId}/discovery/${id}`, json("PUT", change)),
   connections: (orgId: string) => call<ConnectionsResponse>(`/api/orgs/${orgId}/connections`),
   testConnection: (orgId: string, connectionId: string) =>
     call<{ ok: boolean; message: string }>(`/api/orgs/${orgId}/connections/${connectionId}/test`, { method: "POST" }),

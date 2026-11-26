@@ -78,5 +78,26 @@ Daniel confirmed that the ticket buyer typically pays the platform fee, processi
 - **Spend:** admins may enter what a source cost for a show (per tracking code, per currency). It is an expense input, never revenue, never added across currencies, and only shown in the to-date view, where cost per paid ticket = spend ÷ attributed paid tickets (integer minor units, rounded half up). A source with spend and no attributed sales still appears, with no cost per ticket. Ad-platform spend connectors (Meta, Google) would replace manual entry later; not on the roadmap yet.
 - Entered spend is a deviation from "read-only integrations" only in that RevOS stores a number the user typed. Nothing is written to any vendor.
 
+## D19 — AutoRev: scheduled jobs, a weekly digest and an underplay pipeline (2026-11-16)
+Daniel asked for automation on top of RevOS ("AutoRev") and approved it on 2026-11-16. Note that D17 and D18 exist on unmerged branches; this number skips them on purpose.
+- **Background sync.** A daily job refreshes every mapped event on a `live` connection in a non-fixture organization. This ends "manual Refresh only" for live data. Fixture organizations are never swept.
+- **Weekly digest.** RevOS's first outbound action: a plain-text email to an organization's own admins with pace, attention items and new underplay candidates. Sent through Resend from the server. No patron data. Vendor connectors stay read-only.
+- **Run log.** Every scheduled run writes a row to `automation_runs`. A sync that has not succeeded for 36 hours is the first line of the next digest.
+- **Underplay discovery.** A daily job reads Bay Shows (Daniel's own Bay Area concert database) and keeps a per-organization candidate list from two origins: acts on a watchlist that have a Bay Area date, and acts playing small rooms nearby. Rules come from Daniel's August 2026 underplay search; the watchlist and the ten relationship stages come from his ChatGPT handoff v6.1 (2026-11-16).
+- **Scores are unapproved.** The candidate score is a transparent sum of signals with reasons (`discovery v0.1`). The handoff states no weighting was ever approved; these weights are a starting proposal for Daniel to correct. Historical scores from the handoff are not imported as current figures. Vinyl availability is not a signal.
+- **First owner tuning (v0.1, 2026-11-16).** After seeing the first live list (301 candidates from 657 shows), Daniel said promoter billings such as "Moe's Alley Presents" are fine and stay in, and cabaret rooms should rank slightly lower. Cabaret-room shows (today: Feinstein's at the Nikko, matched by venue name because Bay Shows has no cabaret genre) lose one point. The rest of the weights remain unapproved.
+- **Capacity.** Economics use 60 theater seats, which Daniel stated as definitive, not the 100 the handoff's older reports assumed.
+- **This narrows an earlier line.** CLAUDE.md says RevOS is "not a CRM, booking system or marketing sender". With D19 it holds a booking *pipeline* and sends a digest to its own admins. It still makes no offers, sends no outreach and writes to no vendor. Deal terms and settlement stay with Prism.fm (D14).
+- **Not built here:** agent research and outreach drafts, RouteBuilder economics, the national monthly report, booking and show-day tasks.
+
+## D20 — Underplay deal estimate on discovery candidates (2026-11-26)
+Daniel asked for his underplay deal model and ticket-price logic to be added to discovery ("Add the model and price logic from earlier", 2026-11-26). This is a scoped exception to D14, which stands: real deal terms, budgets and settlements still come from Prism.
+- **What it is.** For each discovery candidate, an estimate of the face price his model needs against the price fans may pay, with a fit label (`fits`, `stretch`, `over`, `unknown`). Rules live in `src/domain/underplay.ts`.
+- **The model (Daniel, 2026-11-20).** Work back from gross potential. 60 seats. Guarantee 50% of gross potential. The artist takes 100% after break-even, where break-even is the guarantee, show costs and a 15% promoter profit on gross receipts. An act that fills its usual room keeps about 80% of that door. 250 a ticket is the ceiling. Facility and ticketing fees sit on top of face and are outside this math.
+- **"Needs".** The face price at which a sellout here pays the act what its usual night pays, from 60% sold to a sellout of its usual room.
+- **Two assumptions Daniel has not confirmed**, both named on screen: show costs of 1,000 per show, and fans paying up to 2.5 times the act's usual ticket. He said on 2026-11-20 that the math working does not mean people will pay; the multiple is a placeholder for that answer.
+- **Scoring (`discovery v0.4`).** `fits` adds 2 points, `stretch` adds 1, `over` adds none and says so. A support slot gets no estimate.
+- **Limits.** Missing price or room size is `unknown`, never zero. The listed price may include fees. Integer minor units. The estimate appears on discovery candidates only and never in revenue, reconciliation, targets or any actuals view.
+
 ## Proposed (not done)
 - A `financial_adjustments` table, deferred until a source exposes explicit refund/adjustment amounts. In M1, refunds come from order/line state.

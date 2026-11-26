@@ -124,3 +124,21 @@ Research conditions: `mailchimp.com` is blocked by this environment's network po
 ## Prism.fm (M3, deals/budgets/settlements, D14)
 
 No public API documentation was found (search, 2026-10-21). Prism.fm advertises ticketing integrations (Eventbrite, Etix, See Tickets); third-party directories mention API-key access through a developer portal; consultancies build custom connections. **BLOCKED:** Daniel needs to ask Prism.fm for API access, documentation and terms. No endpoint will be written until those exist.
+
+## Bay Shows (AutoRev discovery source, D19)
+
+Bay Shows is Daniel's own Bay Area concert database (repo `dspicka-sketch/waxpoetic-bay-ahows`, Supabase project `yrenzxspbaordqgtfano`). It is not a third-party vendor. RevOS reads it and never writes to it.
+
+- **Access:** the project's public REST endpoint, `GET /rest/v1/events` with an embedded `venues(capacity)`, authenticated with the project's publishable key in the `apikey` header. `events` and `venues` have row-level-security policies `public read events` / `public read venues` (`supabase/migrations/0001_init.sql` in that repo).
+- **Evidence level: LIVE READ, 2026-11-16.** From the build environment, two paged requests (`limit=2&offset=0`, `limit=2&offset=2`, ordered by `starts_at,id`) answered HTTP 200 with distinct rows; `venues` arrived as `{"capacity": n}`, `price_min` as null or a number. On that date the table held 682 upcoming shows from sources `ticketmaster`, `venue_site` and `manual`; 655 had a venue with a known capacity.
+- **Coverage limits:** 60 miles around San Francisco, next 90 days. Shows that sell outside Ticketmaster appear only when their venue's site is imported. No ticket counts: "sold out" and "low" are the only demand signals.
+- **Terms:** Ticketmaster-sourced rows carry Ticketmaster's Discovery API terms (link back for purchase). RevOS stores only the act, venue, date, status and ticket link of a candidate's anchor show.
+- **Configuration:** `BAYSHOWS_SUPABASE_URL`, `BAYSHOWS_SUPABASE_KEY` (publishable key; public by design, kept in the server environment anyway).
+
+## Resend (AutoRev digest and alert email, D19)
+
+RevOS sends plain-text email to an organization's own admins: the weekly digest and an alert when a scheduled sync could not refresh a show. This is RevOS's only outbound action. No patron data is sent.
+
+- **Endpoint:** `POST https://api.resend.com/emails` with `Authorization: Bearer <key>` and a JSON body of `from`, `to` (array), `subject`, `text`. A success answers with an `id`.
+- **Evidence level: OFFICIAL DOCS, read 2026-11-16** (resend.com/docs/api-reference/emails/send-email). **Not live-verified:** no key was available in the build environment; tests use a fake transport. The first real send is part of the live gate.
+- **Configuration:** `RESEND_API_KEY` (secret) and `REVOS_DIGEST_FROM` (a sender on a domain verified in Resend). Without both, digest and alerts are off and `/api/cron/digest` answers 503.

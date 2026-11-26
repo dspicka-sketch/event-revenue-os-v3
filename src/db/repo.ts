@@ -6,6 +6,7 @@ import type { EventRevenue, SourceReportFigures, ReconciliationRow } from "../do
 import { currencyScale } from "../domain/money.js";
 import type { NormalizedCampaign, NormalizedEvent, NormalizedLine, NormalizedOrder, ProceedsPolicy } from "../domain/types.js";
 import type { CampaignRef, Channel, LinkInfo, MoneyByCurrency } from "../domain/marketing.js";
+import { artistKey, DISCOVERY_METHOD, type AreaShow, type Candidate, type CandidateOrigin, type CandidateStage, type WatchArtist } from "../domain/discovery.js";
 import type { Db } from "./pool.js";
 
 type Queryable = Db | pg.PoolClient;
@@ -639,4 +640,153 @@ export async function setMarketingSpend(db: Queryable, orgId: string, eventId: s
      ON CONFLICT (organization_id, canonical_event_id, code, currency) DO UPDATE SET amount_minor = EXCLUDED.amount_minor, updated_by = EXCLUDED.updated_by, updated_at = now()`,
     [orgId, eventId, code, currency, amountMinor, userId],
   );
+}
+
+// ---------------------------------------------------------------- AutoRev discovery (D19)
+
+/** Adds acts to an organization's watchlist. An act already there (by artist key) is left as it is. */
+export async function addWatchArtists(db: Queryable, orgId: string, artists: { name: string; genre?: string | null }[], sourceNote: string): Promise<number> {
+  let added = 0;
+  for (const a of artists) {
+    const key = artistKey(a.name);
+    if (!key) continue;
+    const r = await db.query(
+      "INSERT INTO watch_artists (organization_id, artist_key, name, genre, source_note) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (organization_id, artist_key) DO NOTHING",
+      [orgId, key, a.name, a.genre ?? null, sourceNote],
+    );
+    added += r.rowCount ?? 0;
+  }
+  return added;
+}
+
+export async function listWatchArtists(db: Queryable, orgId: string): Promise<WatchArtist[]> {
+  const r = await db.query<{ artist_key: string; name: string }>("SELECT artist_key, name FROM watch_artists WHERE organization_id = $1 ORDER BY artist_key", [orgId]);
+  return r.rows.map((x) => ({ artistKey: x.artist_key, name: x.name }));
+}
+
+export interface CandidateRow {
+  id: string;
+  artist_key: string;
+  artist: string;
+  origin: CandidateOrigin;
+  stage: CandidateStage;
+  dismissed_at: Date | null;
+  score: number;
+  reasons: string[];
+  anchor: AreaShow;
+  method: string;
+  first_seen_at: Date;
+  last_seen_at: Date;
+  stage_changed_at: Date | null;
+  notes: string | null;
+}
+
+/** New acts enter at "research". Known acts get fresh score, reasons, origin and anchor; stage, notes and dismissal are never touched. */
+export async function upsertCandidates(db: Queryable, orgId: string, candidates: Candidate[], now: Date): Promise<{ added: number; refreshed: number }> {
+  let added = 0;
+  let refreshed = 0;
+  for (const c of candidates) {
+    const r = await db.query<{ inserted: boolean }>(
+      `INSERT INTO discovery_candidates (organization_id, artist_key, artist, origin, score, reasons, anchor, method, first_seen_at, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $9)
+       ON CONFLICT (organization_id, artist_key) DO UPDATE
+         SET artist = EXCLUDED.artist, origin = EXCLUDED.origin, score = EXCLUDED.score, reasons = EXCLUDED.reasons,
+             anchor = EXCLUDED.anchor, method = EXCLUDED.method, last_seen_at = EXCLUDED.last_seen_at
+       RETURNING (xmax = 0) AS inserted`,
+      [orgId, c.artistKey, c.artist, c.origin, c.score, JSON.stringify(c.reasons), JSON.stringify(c.anchorShow), DISCOVERY_METHOD, now],
+    );
+    if (r.rows[0]?.inserted) added++;
+    else refreshed++;
+  }
+  return { added, refreshed };
+}
+
+export async function listCandidates(db: Queryable, orgId: string, opts: { stage?: CandidateStage; firstSeenSince?: Date; includeDismissed?: boolean } = {}): Promise<CandidateRow[]> {
+  const r = await db.query<CandidateRow>(
+    `SELECT id, artist_key, artist, origin, stage, dismissed_at, score, reasons, anchor, method, first_seen_at, last_seen_at, stage_changed_at, notes
+       FROM discovery_candidates
+      WHERE organization_id = $1
+        AND ($2::text IS NULL OR stage = $2)
+        AND ($3::timestamptz IS NULL OR first_seen_at >= $3)
+        AND ($4::boolean OR dismissed_at IS NULL)
+      ORDER BY score DESC, (anchor->>'startsAt') ASC, artist ASC`,
+    [orgId, opts.stage ?? null, opts.firstSeenSince ?? null, opts.includeDismissed ?? false],
+  );
+  return r.rows;
+}
+
+/** A person's decision about a candidate. Returns false when the id is not this organization's. */
+export async function setCandidateStage(db: Queryable, orgId: string, id: string, change: { stage?: CandidateStage; dismissed?: boolean; notes?: string | null }, now: Date): Promise<boolean> {
+  const r = await db.query(
+    `UPDATE discovery_candidates
+        SET stage = COALESCE($3, stage),
+            stage_changed_at = CASE WHEN $3::text IS NOT NULL AND $3 <> stage THEN $6 ELSE stage_changed_at END,
+            dismissed_at = CASE WHEN $4::boolean IS NULL THEN dismissed_at WHEN $4 THEN COALESCE(dismissed_at, $6) ELSE NULL END,
+            notes = CASE WHEN $7::boolean THEN $5 ELSE notes END
+      WHERE organization_id = $1 AND id = $2`,
+    [orgId, id, change.stage ?? null, change.dismissed ?? null, change.notes ?? null, now, change.notes !== undefined],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------- AutoRev scheduled sync (D19)
+
+export interface SyncableEvent {
+  organizationId: string;
+  eventId: string;
+  name: string;
+  performanceStartUtc: Date | null;
+}
+
+/** Events the daily sweep refreshes: live connections in non-fixture organizations, undated or not older than 7 days. */
+export async function listSyncableEvents(db: Queryable, now: Date): Promise<SyncableEvent[]> {
+  const r = await db.query<{ organization_id: string; id: string; name: string; performance_start_utc: Date | null }>(
+    `SELECT e.organization_id, e.id, e.name, e.performance_start_utc
+       FROM canonical_events e
+       JOIN organizations o ON o.id = e.organization_id AND NOT o.is_fixture
+       JOIN source_event_mappings m ON m.canonical_event_id = e.id AND m.organization_id = e.organization_id
+       JOIN source_connections c ON c.id = m.connection_id AND c.organization_id = e.organization_id AND c.mode = 'live'
+      WHERE e.performance_start_utc IS NULL OR e.performance_start_utc > $1::timestamptz - interval '7 days'
+      ORDER BY e.organization_id, e.performance_start_utc NULLS LAST, e.id`,
+    [now],
+  );
+  return r.rows.map((x) => ({ organizationId: x.organization_id, eventId: x.id, name: x.name, performanceStartUtc: x.performance_start_utc }));
+}
+
+// ---------------------------------------------------------------- AutoRev run log (D19)
+
+export type AutomationJob = "sync_sweep" | "weekly_digest" | "discovery";
+
+export async function startAutomationRun(db: Queryable, job: AutomationJob, organizationId: string | null, now: Date): Promise<string> {
+  const r = await db.query<{ id: string }>("INSERT INTO automation_runs (job, organization_id, started_at) VALUES ($1, $2, $3) RETURNING id", [job, organizationId, now]);
+  return r.rows[0]!.id;
+}
+
+export async function finishAutomationRun(db: Queryable, runId: string, status: "succeeded" | "failed", detail: unknown, now: Date): Promise<void> {
+  await db.query("UPDATE automation_runs SET status = $2, detail = $3::jsonb, finished_at = $4 WHERE id = $1", [runId, status, JSON.stringify(detail ?? {}), now]);
+}
+
+export async function lastSucceededRun(db: Queryable, job: AutomationJob): Promise<{ finishedAt: Date } | null> {
+  const r = await db.query<{ finished_at: Date }>("SELECT finished_at FROM automation_runs WHERE job = $1 AND status = 'succeeded' ORDER BY finished_at DESC, seq DESC LIMIT 1", [job]);
+  return r.rows[0] ? { finishedAt: r.rows[0].finished_at } : null;
+}
+
+/** The most recent run that finished, whether it succeeded or failed. */
+export async function lastFinishedRun(db: Queryable, job: AutomationJob): Promise<{ status: "succeeded" | "failed"; finishedAt: Date; detail: unknown } | null> {
+  const r = await db.query<{ status: "succeeded" | "failed"; finished_at: Date; detail: unknown }>(
+    "SELECT status, finished_at, detail FROM automation_runs WHERE job = $1 AND finished_at IS NOT NULL ORDER BY finished_at DESC, seq DESC LIMIT 1", [job]);
+  return r.rows[0] ? { status: r.rows[0].status, finishedAt: r.rows[0].finished_at, detail: r.rows[0].detail } : null;
+}
+
+/** Email addresses of an organization's admins whose accounts are enabled. */
+export async function listOrgAdminEmails(db: Queryable, orgId: string): Promise<string[]> {
+  const r = await db.query<{ email: string }>(
+    `SELECT u.email FROM organization_members m JOIN users u ON u.id = m.user_id
+      WHERE m.organization_id = $1 AND m.role = 'admin' AND u.disabled_at IS NULL ORDER BY lower(u.email)`, [orgId]);
+  return r.rows.map((x) => x.email);
+}
+
+export async function listLiveOrganizations(db: Queryable): Promise<OrganizationRow[]> {
+  const r = await db.query<OrganizationRow>("SELECT id, name, timezone, is_fixture FROM organizations WHERE NOT is_fixture ORDER BY name, id");
+  return r.rows;
 }
